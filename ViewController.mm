@@ -34,6 +34,27 @@ extern "C" {
 @property (nonatomic, strong) UISegmentedControl *segmentedControl;
 @property (nonatomic, strong) NSDictionary *selectedAppDetails;
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *detailSections;
+
+- (NSString *)formattedValueForObject:(id)obj {
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSMutableString *s = [NSMutableString stringWithString:@"{\n"];
+        NSDictionary *dict = (NSDictionary *)obj;
+        [dict enumerateKeysAndObjectsUsingBlock:^(id key, id val, BOOL *stop) {
+            [s appendFormat:@"  %@: %@\n", key, [self formattedValueForObject:val]];
+        }];
+        [s appendString:@"}"];
+        return s;
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        NSMutableString *s = [NSMutableString stringWithString:@"[\n"];
+        for (id item in (NSArray *)obj) {
+            [s appendFormat:@"  %@,\n", [self formattedValueForObject:item]];
+        }
+        [s appendString:@"]"];
+        return s;
+    }
+    return [NSString stringWithFormat:@"%@", obj];
+}
+
 @end
 
 @implementation ViewController
@@ -458,8 +479,9 @@ extern "C" {
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (tableView == self.tableView) return nil;
-    NSArray *headers = @[@"IDENTIFICATION", @"LOCATIONS", @"EXTRAS"];
-    return headers[section];
+    NSArray *headers = @[@"IDENTIFICATION", @"PATHS", @"CAPABILITIES"];
+    if (section < headers.count) return headers[section];
+    return nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -505,7 +527,9 @@ extern "C" {
 
         NSString *key = self.detailSections[indexPath.section][indexPath.row];
         cell.textLabel.text = key;
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@", self.selectedAppDetails[key] ?: @"N/A"];
+        id value = self.selectedAppDetails[key];
+        cell.detailTextLabel.text = [self formattedValueForObject:value] ?: @"N/A";
+        cell.detailTextLabel.numberOfLines = 0;
         return cell;
     }
 }
@@ -520,7 +544,7 @@ extern "C" {
 - (void)showAppDetails:(NSDictionary *)app {
     self.selectedAppDetails = app;
     self.detailSections = @[
-        @[@"CFBundleIdentifier", @"ApplicationType"],
+        @[@"CFBundleDisplayName", @"CFBundleName", @"CFBundleIdentifier", @"ApplicationType"],
         @[@"Path", @"Container"],
         @[@"Entitlements"]
     ];
@@ -529,34 +553,57 @@ extern "C" {
     detailVC.title = @"App Details";
     detailVC.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
 
-    UITableView *tv = [[UITableView alloc] initWithFrame:detailVC.view.bounds style:UITableViewStyleGrouped];
+    UITableView *tv = [[UITableView alloc] initWithFrame:detailVC.view.bounds style:UITableViewStyleInsetGrouped];
     tv.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     tv.delegate = self;
     tv.dataSource = self;
+    tv.rowHeight = UITableViewAutomaticDimension;
+    tv.estimatedRowHeight = 44;
     [detailVC.view addSubview:tv];
 
     // Header View
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, detailVC.view.bounds.size.width, 180)];
-    UIImageView *iconView = [[UIImageView alloc] initWithFrame:CGRectMake((header.bounds.size.width-80)/2, 20, 80, 80)];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 160)];
+    UIImageView *iconView = [[UIImageView alloc] init];
     iconView.image = [self.iconCache objectForKey:app[@"CFBundleIdentifier"]] ?: [UIImage systemImageNamed:@"app.dashed"];
     iconView.contentMode = UIViewContentModeScaleAspectFit;
-    iconView.layer.cornerRadius = 16;
+    iconView.layer.cornerRadius = 20;
     iconView.clipsToBounds = YES;
+    iconView.translatesAutoresizingMaskIntoConstraints = NO;
     [header addSubview:iconView];
 
-    UILabel *nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 110, header.bounds.size.width-40, 30)];
+    UILabel *nameLabel = [[UILabel alloc] init];
     nameLabel.text = app[@"CFBundleDisplayName"] ?: app[@"CFBundleName"] ?: @"Unknown";
-    nameLabel.font = [UIFont boldSystemFontOfSize:20];
+    nameLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle2];
     nameLabel.textAlignment = NSTextAlignmentCenter;
+    nameLabel.numberOfLines = 2;
+    nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [header addSubview:nameLabel];
 
-    UILabel *verLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 140, header.bounds.size.width-40, 20)];
+    UILabel *verLabel = [[UILabel alloc] init];
     verLabel.text = [NSString stringWithFormat:@"Version: %@", app[@"CFBundleShortVersionString"] ?: app[@"CFBundleVersion"] ?: @"N/A"];
-    verLabel.font = [UIFont systemFontOfSize:14];
+    verLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     verLabel.textColor = [UIColor secondaryLabelColor];
     verLabel.textAlignment = NSTextAlignmentCenter;
+    verLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [header addSubview:verLabel];
 
+    [NSLayoutConstraint activateConstraints:@[
+        [iconView.centerXAnchor constraintEqualToAnchor:header.centerXAnchor],
+        [iconView.topAnchor constraintEqualToAnchor:header.topAnchor constant:20],
+        [iconView.widthAnchor constraintEqualToConstant:80],
+        [iconView.heightAnchor constraintEqualToConstant:80],
+
+        [nameLabel.topAnchor constraintEqualToAnchor:iconView.bottomAnchor constant:12],
+        [nameLabel.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:20],
+        [nameLabel.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-20],
+
+        [verLabel.topAnchor constraintEqualToAnchor:nameLabel.bottomAnchor constant:4],
+        [verLabel.centerXAnchor constraintEqualToAnchor:header.centerXAnchor],
+        [verLabel.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-10]
+    ]];
+
+    CGSize size = [header systemLayoutSizeFittingSize:UILayoutFittingCompressedSize];
+    header.frame = CGRectMake(0, 0, size.width, size.height);
     tv.tableHeaderView = header;
 
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:detailVC];
@@ -606,5 +653,26 @@ extern "C" {
     });
 }
 
+
+
+- (NSString *)formattedValueForObject:(id)obj {
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSMutableString *s = [NSMutableString stringWithString:@"{\n"];
+        NSDictionary *dict = (NSDictionary *)obj;
+        [dict enumerateKeysAndObjectsUsingBlock:^(id key, id val, BOOL *stop) {
+            [s appendFormat:@"  %@: %@\n", key, [self formattedValueForObject:val]];
+        }];
+        [s appendString:@"}"];
+        return s;
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        NSMutableString *s = [NSMutableString stringWithString:@"[\n"];
+        for (id item in (NSArray *)obj) {
+            [s appendFormat:@"  %@,\n", [self formattedValueForObject:item]];
+        }
+        [s appendString:@"]"];
+        return s;
+    }
+    return [NSString stringWithFormat:@"%@", obj];
+}
 
 @end
