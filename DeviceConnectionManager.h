@@ -1,6 +1,13 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 #import "./idevice.h"
+#ifdef __cplusplus
+}
+#endif
 
 @protocol DeviceConnectionManagerDelegate <NSObject>
 - (void)managerDidLog:(NSString *)message;
