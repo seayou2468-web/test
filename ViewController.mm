@@ -79,7 +79,7 @@
     [self.view addSubview:self.disconnectButton];
 
     self.locationButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.locationButton setTitle:@"Simulate" forState:UIControlStateNormal];
+    [self.locationButton setTitle:@"Simulate Location" forState:UIControlStateNormal];
     self.locationButton.backgroundColor = [UIColor systemGreenColor];
     [self.locationButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.locationButton.layer.cornerRadius = 10;
@@ -116,12 +116,12 @@
 
         [self.disconnectButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
         [self.disconnectButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [self.disconnectButton.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.5 constant:-25],
+        [self.disconnectButton.trailingAnchor constraintEqualToAnchor:self.view.centerXAnchor constant:-5],
         [self.disconnectButton.heightAnchor constraintEqualToConstant:50],
 
         [self.locationButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
+        [self.locationButton.leadingAnchor constraintEqualToAnchor:self.view.centerXAnchor constant:5],
         [self.locationButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
-        [self.locationButton.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.5 constant:-25],
         [self.locationButton.heightAnchor constraintEqualToConstant:50],
     ]];
 
@@ -139,7 +139,7 @@
 }
 
 - (void)showLocationPicker {
-    [self managerDidLog:@"[UI] Showing Location Picker..."];
+    [self managerDidLog:@"[UI] User clicked Simulate Location button."];
     LocationPickerViewController *picker = [[LocationPickerViewController alloc] init];
     picker.delegate = self;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
@@ -311,7 +311,6 @@
     detailVC.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
 
     UITableView *tv = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
-    tv.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     tv.delegate = self;
     tv.dataSource = self;
     tv.rowHeight = UITableViewAutomaticDimension;

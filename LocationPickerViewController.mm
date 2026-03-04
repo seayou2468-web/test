@@ -25,7 +25,6 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 
 @property (nonatomic, assign) CLLocationCoordinate2D currentSimulatedLocation;
 @property (nonatomic, assign) NSInteger currentWaypointIndex;
-@property (nonatomic, assign) double currentSpeed; // meters per second
 
 @end
 
@@ -36,7 +35,6 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     self.title = @"Location Simulation";
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     self.waypoints = [NSMutableArray array];
-    self.currentSpeed = 5.0; // 5m/s ~ 18km/h
 
     [self setupUI];
 }
@@ -67,6 +65,12 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     self.modeControl.translatesAutoresizingMaskIntoConstraints = NO;
     [panel addSubview:self.modeControl];
 
+    UILabel *speedText = [[UILabel alloc] init];
+    speedText.text = @"Speed (m/s)";
+    speedText.font = [UIFont systemFontOfSize:12];
+    speedText.translatesAutoresizingMaskIntoConstraints = NO;
+    [panel addSubview:speedText];
+
     self.speedSlider = [[UISlider alloc] init];
     self.speedSlider.minimumValue = 1.0;
     self.speedSlider.maximumValue = 30.0;
@@ -74,7 +78,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     self.speedSlider.translatesAutoresizingMaskIntoConstraints = NO;
     [panel addSubview:self.speedSlider];
 
-    self.joystick = [[JoystickView alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
+    self.joystick = [[JoystickView alloc] initWithFrame:CGRectZero];
     self.joystick.delegate = self;
     self.joystick.translatesAutoresizingMaskIntoConstraints = NO;
     [panel addSubview:self.joystick];
@@ -109,7 +113,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         [self.mapView.topAnchor constraintEqualToAnchor:self.searchBar.bottomAnchor],
         [self.mapView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.mapView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.mapView.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.5],
+        [self.mapView.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.4],
 
         [panel.topAnchor constraintEqualToAnchor:self.mapView.bottomAnchor],
         [panel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
@@ -120,24 +124,27 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         [self.modeControl.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:20],
         [self.modeControl.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-20],
 
-        [self.speedSlider.topAnchor constraintEqualToAnchor:self.modeControl.bottomAnchor constant:10],
-        [self.speedSlider.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:20],
+        [speedText.topAnchor constraintEqualToAnchor:self.modeControl.bottomAnchor constant:10],
+        [speedText.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:20],
+
+        [self.speedSlider.centerYAnchor constraintEqualToAnchor:speedText.centerYAnchor],
+        [self.speedSlider.leadingAnchor constraintEqualToAnchor:speedText.trailingAnchor constant:10],
         [self.speedSlider.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-20],
 
         [self.joystick.topAnchor constraintEqualToAnchor:self.speedSlider.bottomAnchor constant:10],
         [self.joystick.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:20],
-        [self.joystick.widthAnchor constraintEqualToConstant:100],
-        [self.joystick.heightAnchor constraintEqualToConstant:100],
+        [self.joystick.widthAnchor constraintEqualToConstant:120],
+        [self.joystick.heightAnchor constraintEqualToConstant:120],
 
-        [self.actionButton.centerYAnchor constraintEqualToAnchor:self.joystick.centerYAnchor constant:-25],
+        [self.actionButton.topAnchor constraintEqualToAnchor:self.joystick.topAnchor],
         [self.actionButton.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-20],
         [self.actionButton.leadingAnchor constraintEqualToAnchor:self.joystick.trailingAnchor constant:20],
-        [self.actionButton.heightAnchor constraintEqualToConstant:44],
+        [self.actionButton.heightAnchor constraintEqualToConstant:50],
 
-        [self.resetButton.centerYAnchor constraintEqualToAnchor:self.joystick.centerYAnchor constant:25],
+        [self.resetButton.bottomAnchor constraintEqualToAnchor:self.joystick.bottomAnchor],
         [self.resetButton.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-20],
         [self.resetButton.leadingAnchor constraintEqualToAnchor:self.joystick.trailingAnchor constant:20],
-        [self.resetButton.heightAnchor constraintEqualToConstant:44],
+        [self.resetButton.heightAnchor constraintEqualToConstant:50],
 
         [self.statusLabel.bottomAnchor constraintEqualToAnchor:panel.bottomAnchor constant:-10],
         [self.statusLabel.centerXAnchor constraintEqualToAnchor:panel.centerXAnchor]
@@ -170,7 +177,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     if (self.waypoints.count < 2) return;
 
     CLLocationCoordinate2D coords[self.waypoints.count];
-    for (NSInteger i = 0; i < self.waypoints.count; i++) {
+    for (NSInteger i = 0; i < (NSInteger)self.waypoints.count; i++) {
         coords[i] = self.waypoints[i].coordinate;
     }
     self.routeLine = [MKPolyline polylineWithCoordinates:coords count:self.waypoints.count];
@@ -194,16 +201,15 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         [self stopSimulation];
         return;
     }
-
     if (self.waypoints.count == 0) return;
 
     SimulationMode mode = (SimulationMode)self.modeControl.selectedSegmentIndex;
     if (mode == ModeTeleport) {
         [self.delegate didSelectLocation:self.waypoints.lastObject.coordinate];
-    } else if (mode == ModeLinear || mode == ModeCustom) {
-        [self startMovementSimulation];
     } else if (mode == ModeRoad) {
         [self calculateAndStartRoadRoute];
+    } else {
+        [self startMovementSimulation];
     }
 }
 
@@ -213,23 +219,21 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     self.currentSimulatedLocation = self.waypoints[0].coordinate;
     [self.actionButton setTitle:@"Stop" forState:UIControlStateNormal];
     [self.actionButton setBackgroundColor:[UIColor systemRedColor]];
-
     self.movementTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(movementTick) userInfo:nil repeats:YES];
 }
 
 - (void)movementTick {
-    if (self.currentWaypointIndex >= self.waypoints.count - 1) {
+    if (self.currentWaypointIndex >= (NSInteger)self.waypoints.count - 1) {
         [self stopSimulation];
         return;
     }
 
     CLLocationCoordinate2D start = self.currentSimulatedLocation;
     CLLocationCoordinate2D end = self.waypoints[self.currentWaypointIndex + 1].coordinate;
-
     CLLocation *startLoc = [[CLLocation alloc] initWithLatitude:start.latitude longitude:start.longitude];
     CLLocation *endLoc = [[CLLocation alloc] initWithLatitude:end.latitude longitude:end.longitude];
     double distance = [endLoc distanceFromLocation:startLoc];
-    double step = self.speedSlider.value; // meters per tick (1s)
+    double step = self.speedSlider.value;
 
     if (distance <= step) {
         self.currentSimulatedLocation = end;
@@ -241,21 +245,11 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
             start.longitude + (end.longitude - start.longitude) * ratio
         );
     }
-
     [self.delegate didSelectLocation:self.currentSimulatedLocation];
-    self.statusLabel.text = [NSString stringWithFormat:@"Simulating: %.6f, %.6f", self.currentSimulatedLocation.latitude, self.currentSimulatedLocation.longitude];
-}
-
-- (void)stopSimulation {
-    [self.movementTimer invalidate];
-    self.movementTimer = nil;
-    [self.actionButton setTitle:@"Start" forState:UIControlStateNormal];
-    [self.actionButton setBackgroundColor:[UIColor systemGreenColor]];
 }
 
 - (void)calculateAndStartRoadRoute {
     if (self.waypoints.count < 2) return;
-
     MKDirectionsRequest *request = [[MKDirectionsRequest alloc] init];
     request.source = [[MKMapItem alloc] initWithPlacemark:[[MKPlacemark alloc] initWithCoordinate:self.waypoints[0].coordinate]];
     request.destination = [[MKMapItem alloc] initWithPlacemark:[[MKPlacemark alloc] initWithCoordinate:self.waypoints.lastObject.coordinate]];
@@ -266,22 +260,26 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         if (response.routes.count > 0) {
             MKRoute *route = response.routes.firstObject;
             [self.mapView addOverlay:route.polyline];
-            // In a real implementation, we would extract steps from route.polyline
-            [self startMovementSimulation]; // Using basic linear for now as simplification
+            [self startMovementSimulation];
         }
     }];
+}
+
+- (void)stopSimulation {
+    [self.movementTimer invalidate];
+    self.movementTimer = nil;
+    [self.actionButton setTitle:@"Start" forState:UIControlStateNormal];
+    [self.actionButton setBackgroundColor:[UIColor systemGreenColor]];
 }
 
 #pragma mark - Joystick & Controls
 
 - (void)joystickDidMoveWithOffset:(CGPoint)offset {
     [self stopSimulation];
-    // Move current location based on joystick offset and speed
-    double step = (self.speedSlider.value / 111320.0) * 0.1; // roughly convert meters to degrees
+    double step = (self.speedSlider.value / 111320.0) * 0.1;
     CLLocationCoordinate2D newCoord = self.mapView.centerCoordinate;
     newCoord.latitude -= offset.y * step;
     newCoord.longitude += offset.x * step;
-
     [self.mapView setCenterCoordinate:newCoord animated:NO];
     [self.delegate didSelectLocation:newCoord];
 }
@@ -295,8 +293,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     MKLocalSearch *search = [[MKLocalSearch alloc] initWithRequest:request];
     [search startWithCompletionHandler:^(MKLocalSearchResponse *response, NSError *error) {
         if (response.mapItems.count > 0) {
-            MKMapItem *item = response.mapItems.firstObject;
-            [self.mapView setCenterCoordinate:item.placemark.coordinate animated:YES];
+            [self.mapView setCenterCoordinate:response.mapItems.firstObject.placemark.coordinate animated:YES];
         }
     }];
 }

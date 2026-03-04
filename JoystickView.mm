@@ -3,6 +3,7 @@
 @interface JoystickView () {
     UIView *_stick;
     UIView *_base;
+    BOOL _setupDone;
 }
 @end
 
@@ -11,7 +12,7 @@
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        [self setupUI];
+        [self commonInit];
     }
     return self;
 }
@@ -19,32 +20,49 @@
 - (instancetype)initWithCoder:(NSCoder *)coder {
     self = [super initWithCoder:coder];
     if (self) {
-        [self setupUI];
+        [self commonInit];
     }
     return self;
 }
 
-- (void)setupUI {
+- (void)commonInit {
     self.backgroundColor = [UIColor clearColor];
+    _setupDone = NO;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (!_setupDone) {
+        [self setupUI];
+        _setupDone = YES;
+    }
 
     CGFloat size = MIN(self.bounds.size.width, self.bounds.size.height);
-    _base = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
+    _base.frame = CGRectMake(0, 0, size, size);
     _base.center = CGPointMake(self.bounds.size.width / 2, self.bounds.size.height / 2);
-    _base.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.2];
     _base.layer.cornerRadius = size / 2;
-    _base.layer.borderWidth = 2;
-    _base.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.5].CGColor;
-    [self addSubview:_base];
 
     CGFloat stickSize = size * 0.4;
-    _stick = [[UIView alloc] initWithFrame:CGRectMake(0, 0, stickSize, stickSize)];
+    _stick.frame = CGRectMake(0, 0, stickSize, stickSize);
     _stick.center = _base.center;
-    _stick.backgroundColor = [UIColor systemBlueColor];
     _stick.layer.cornerRadius = stickSize / 2;
+}
+
+- (void)setupUI {
+    _base = [[UIView alloc] init];
+    _base.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.2];
+    _base.layer.borderWidth = 2;
+    _base.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.5].CGColor;
+    _base.userInteractionEnabled = NO;
+    [self addSubview:_base];
+
+    _stick = [[UIView alloc] init];
+    _stick.backgroundColor = [UIColor systemBlueColor];
     _stick.layer.shadowColor = [UIColor blackColor].CGColor;
     _stick.layer.shadowOffset = CGSizeZero;
     _stick.layer.shadowRadius = 4;
     _stick.layer.shadowOpacity = 0.5;
+    _stick.userInteractionEnabled = NO;
     [self addSubview:_stick];
 }
 
@@ -79,7 +97,7 @@
 
     _stick.center = location;
 
-    CGPoint offset = CGPointMake((location.x - center.x) / radius, (location.y - center.y) / radius);
+    CGPoint offset = CGPointMake((location.x - center.x) / (radius > 0 ? radius : 1), (location.y - center.y) / (radius > 0 ? radius : 1));
     [self.delegate joystickDidMoveWithOffset:offset];
 }
 
