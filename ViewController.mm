@@ -13,7 +13,7 @@ extern "C" {
 
 @interface ViewController () {
     struct IdevicePairingFile *_pairingFile;
-    struct IdeviceProviderHandle *_provider;
+    struct IdeviceHandle *_device;
     struct LockdowndClientHandle *_lockdown;
 }
 @property (nonatomic, strong) UITextView *logView;
@@ -29,7 +29,7 @@ extern "C" {
     CGRect viewBounds = [[self view] bounds];
 
     _pairingFile = NULL;
-    _provider = NULL;
+    _device = NULL;
     _lockdown = NULL;
 
     self.logView = [[UITextView alloc] initWithFrame:CGRectMake(20, 100, viewBounds.size.width - 40, 350)];
@@ -51,10 +51,10 @@ extern "C" {
     [self.disconnectButton setEnabled:NO];
     [[self view] addSubview:self.disconnectButton];
 
-    [self log:@"Initializing idevice logger..."];
+    [self log:@"Initializing idevice logger (Debug level)..."];
     idevice_init_logger(Debug, Debug, NULL);
 
-    [self log:@"App Initialized. Using idevice_pairing_file_read directly."];
+    [self log:@"App Initialized. Sequence: TCP -> StartSession -> Lockdownd."];
 }
 
 - (void)log:(NSString *)message {
@@ -80,9 +80,9 @@ extern "C" {
         lockdownd_client_free(_lockdown);
         _lockdown = NULL;
     }
-    if (_provider) {
-        idevice_provider_free(_provider);
-        _provider = NULL;
+    if (_device) {
+        idevice_free(_device);
+        _device = NULL;
     }
     if (_pairingFile) {
         idevice_pairing_file_free(_pairingFile);
@@ -122,7 +122,7 @@ extern "C" {
 
     [self cleanupConnection];
 
-    [self log:@"STEP 1: idevice_pairing_file_read (direct path)..."];
+    [self log:@"STEP 1: Reading pairing file..."];
     err = idevice_pairing_file_read([filePath UTF8String], &_pairingFile);
     if (err || !_pairingFile) {
         [self log:[NSString stringWithFormat:@"FAILED to read pairing file: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
@@ -131,7 +131,7 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 2: idevice_tcp_provider_new (10.7.0.1)..."];
+    [self log:@"STEP 2: Connecting to 10.7.0.1 (TCP)..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
@@ -139,52 +139,61 @@ extern "C" {
     addr.sin_port = htons(LOCKDOWN_PORT);
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
-    err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, _pairingFile, "test-app", &_provider);
-    if (err || !_provider) {
-        [self log:[NSString stringWithFormat:@"FAILED to create provider: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+    err = idevice_new_tcp_socket((const idevice_sockaddr *)&addr, sizeof(addr), "test-app", &_device);
+    if (err || !_device) {
+        [self log:[NSString stringWithFormat:@"FAILED to create device socket: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
         [self cleanupConnection];
         return;
     }
 
-    [self log:@"STEP 3: lockdownd_connect..."];
-    err = lockdownd_connect(_provider, &_lockdown);
-    if (err || !_lockdown) {
-        [self log:[NSString stringWithFormat:@"FAILED to connect to lockdownd: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
-        if (err) idevice_error_free(err);
-        [self cleanupConnection];
-        return;
-    }
-
-    [self log:@"STEP 4: lockdownd_start_session..."];
-    err = lockdownd_start_session(_lockdown, _pairingFile);
+    [self log:@"STEP 3: Starting session (idevice_start_session)..."];
+    err = idevice_start_session(_device, _pairingFile, false);
     if (err) {
-        [self log:[NSString stringWithFormat:@"FAILED to start session: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
-        if (err) idevice_error_free(err);
-    } else {
-        [self log:@"SUCCESS: Session and TLS established."];
+        [self log:[NSString stringWithFormat:@"FAILED with legacy=false: %s (%d). Retrying with legacy=true...", (err && err->message) ? err->message : "N/A", err->code]];
+        idevice_error_free(err);
 
-        [self log:@"STEP 5: lockdownd_get_value (DeviceName)..."];
-        plist_t val = NULL;
-        err = lockdownd_get_value(_lockdown, "DeviceName", NULL, &val);
-        if (!err && val) {
-            char *name = NULL;
-            plist_get_string_val(val, &name);
-            if (name) {
-                [self log:[NSString stringWithFormat:@"RESULT: DeviceName = %s", name]];
-                plist_mem_free(name);
-            }
-            plist_free(val);
-        } else {
-            if (err) idevice_error_free(err);
+        err = idevice_start_session(_device, _pairingFile, true);
+        if (err) {
+            [self log:[NSString stringWithFormat:@"FAILED with legacy=true: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
+            idevice_error_free(err);
+            [self cleanupConnection];
+            return;
         }
+    }
+
+    [self log:@"SUCCESS: Session started."];
+
+    [self log:@"STEP 4: Connecting to lockdownd service..."];
+    err = lockdownd_new(_device, &_lockdown);
+    if (err || !_lockdown) {
+        [self log:[NSString stringWithFormat:@"FAILED to create lockdown client: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+        if (err) idevice_error_free(err);
+        [self cleanupConnection];
+        return;
+    }
+
+    [self log:@"STEP 5: Verifying encrypted communication (DeviceName)..."];
+    plist_t val = NULL;
+    err = lockdownd_get_value(_lockdown, "DeviceName", NULL, &val);
+    if (err) {
+        [self log:[NSString stringWithFormat:@"FAILED to get DeviceName: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
+        if (err) idevice_error_free(err);
+    } else if (val) {
+        char *name = NULL;
+        plist_get_string_val(val, &name);
+        if (name) {
+            [self log:[NSString stringWithFormat:@"RESULT: DeviceName = %s", name]];
+            plist_mem_free(name);
+        }
+        plist_free(val);
     }
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.disconnectButton setEnabled:YES];
     });
 
-    [self log:@"Connection sequence finished."];
+    [self log:@"Connection sequence complete."];
 }
 
 @end
