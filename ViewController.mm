@@ -54,31 +54,30 @@ extern "C" {
     [self.disconnectButton setEnabled:NO];
     [[self view] addSubview:self.disconnectButton];
 
-    [self log:@"Initializing idevice logger..."];
-    idevice_init_logger(Debug, Debug, NULL);
-
-    [self log:@"App Initialized. Provider (No Pairing) -> Lockdownd -> StartSession."];
+    [self log:@"App Initialized. Port: 62078, IP: 10.7.0.1"];
 }
 
 - (void)log:(NSString *)message {
     if (!message) return;
+    NSLog(@"[APP_LOG] %@", message);
     dispatch_async(dispatch_get_main_queue(), ^{
         NSString *currentText = [self.logView text] ?: @"";
         NSString *newText = [currentText stringByAppendingFormat:@"[%@] %@\n", [NSDate date], message];
         [self.logView setText:newText];
         [self.logView scrollRangeToVisible:NSMakeRange([newText length], 0)];
-        NSLog(@"[APP_LOG] %@", message);
     });
 }
 
 - (void)selectPairingFile {
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:[NSArray arrayWithObject:UTTypeItem] asCopy:YES];
+    [self log:@"Opening Document Picker..."];
+    NSArray *types = [NSArray arrayWithObject:UTTypeItem];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
     [picker setDelegate:self];
     [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)cleanupConnection {
-    [self log:@"Cleanup Triggered. Stopping Heartbeat..."];
+    [self log:@"Starting Cleanup..."];
     if (self.heartbeatTimer) {
         [self.heartbeatTimer invalidate];
         self.heartbeatTimer = nil;
@@ -103,17 +102,27 @@ extern "C" {
         [self.connectButton setEnabled:YES];
         [self.disconnectButton setEnabled:NO];
     });
-    [self log:@"Cleanup complete."];
+    [self log:@"Cleanup finished."];
 }
 
 #pragma mark - UIDocumentPickerDelegate
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    [self log:@"Document picked."];
     NSURL *url = [urls firstObject];
     if (url) {
-        NSString *path = [[url path] copy];
-        [self log:[NSString stringWithFormat:@"File picked: %@", path]];
+        [self log:[NSString stringWithFormat:@"Selected URL: %@", url]];
+        NSString *path = [url path];
+        if (!path) {
+            [self log:@"ERROR: Failed to get path from URL."];
+            return;
+        }
+
+        // Since asCopy:YES is used, the file is already in our sandbox tmp.
+        // startAccessingSecurityScopedResource is usually for in-place access,
+        // but we'll try it and log the result just in case.
         BOOL canAccess = [url startAccessingSecurityScopedResource];
+        [self log:[NSString stringWithFormat:@"Security Access Granted: %d", canAccess]];
 
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.connectButton setEnabled:NO];
@@ -129,20 +138,26 @@ extern "C" {
 }
 
 - (void)performConnect:(NSString *)filePath {
-    struct IdeviceFfiError *err = NULL;
-
+    [self log:@"performConnect started."];
     [self cleanupConnection];
 
-    [self log:@"STEP 1: Reading pairing file..."];
-    err = idevice_pairing_file_read([filePath UTF8String], &_pairingFile);
-    if (err || !_pairingFile) {
-        [self log:[NSString stringWithFormat:@"FAILED to read pairing file: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
-        if (err) idevice_error_free(err);
-        [self cleanupConnection];
+    [self log:@"STEP 1: Verifying file existence..."];
+    if (![[NSFileManager defaultManager] isReadableFileAtPath:filePath]) {
+        [self log:[NSString stringWithFormat:@"ERROR: File not readable at %@", filePath]];
         return;
     }
 
-    [self log:@"STEP 2: Creating TCP provider (No Pairing) for 10.7.0.1:62078..."];
+    [self log:@"STEP 2: idevice_pairing_file_read..."];
+    const char *cPath = [filePath fileSystemRepresentation];
+    struct IdeviceFfiError *err = idevice_pairing_file_read(cPath, &_pairingFile);
+    if (err || !_pairingFile) {
+        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+        if (err) idevice_error_free(err);
+        return;
+    }
+    [self log:@"Pairing file read OK."];
+
+    [self log:@"STEP 3: idevice_tcp_provider_new (10.7.0.1:62078, NULL pairing)..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
@@ -150,56 +165,56 @@ extern "C" {
     addr.sin_port = htons(62078);
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
-    // Passing NULL for pairing file as requested
     err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, NULL, "test-app", &_provider);
     if (err || !_provider) {
-        [self log:[NSString stringWithFormat:@"FAILED to create provider: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
         [self cleanupConnection];
         return;
     }
+    [self log:@"Provider created OK."];
 
-    [self log:@"STEP 3: Connecting to lockdownd (Unencrypted phase)..."];
+    [self log:@"STEP 4: lockdownd_connect..."];
     err = lockdownd_connect(_provider, &_lockdown);
     if (err || !_lockdown) {
-        [self log:[NSString stringWithFormat:@"FAILED to connect to lockdownd: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
         [self cleanupConnection];
         return;
     }
+    [self log:@"Lockdown connected OK."];
 
-    [self log:@"STEP 4: lockdownd_start_session (Initiating TLS)..."];
+    [self log:@"STEP 5: lockdownd_start_session (with pairing file)..."];
     err = lockdownd_start_session(_lockdown, _pairingFile);
     if (err) {
-        [self log:[NSString stringWithFormat:@"FAILED to start session: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
+        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
         if (err) idevice_error_free(err);
         [self cleanupConnection];
         return;
     }
+    [self log:@"Session/TLS started OK."];
 
-    [self log:@"SUCCESS: TLS Handshake complete. Session established."];
-
-    [self log:@"STEP 5: Connecting to Heartbeat service..."];
+    [self log:@"STEP 6: heartbeat_connect..."];
     err = heartbeat_connect(_provider, &_heartbeat);
     if (err || !_heartbeat) {
-        [self log:[NSString stringWithFormat:@"FAILED to connect to Heartbeat: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
     } else {
-        [self log:@"SUCCESS: Heartbeat connected. Starting timer..."];
+        [self log:@"Heartbeat connected OK. Starting timer (10s)..."];
         dispatch_async(dispatch_get_main_queue(), ^{
             self.heartbeatTimer = [NSTimer scheduledTimerWithTimeInterval:10.0 target:self selector:@selector(onHeartbeatTimer) userInfo:nil repeats:YES];
             [self.disconnectButton setEnabled:YES];
         });
     }
 
-    [self log:@"STEP 6: Verifying connection (DeviceName)..."];
+    [self log:@"STEP 7: Verifying connection with get_value..."];
     plist_t val = NULL;
     err = lockdownd_get_value(_lockdown, "DeviceName", NULL, &val);
     if (!err && val) {
         char *name = NULL;
         plist_get_string_val(val, &name);
         if (name) {
-            [self log:[NSString stringWithFormat:@"RESULT: DeviceName = %s", name]];
+            [self log:[NSString stringWithFormat:@"DeviceName: %s", name]];
             plist_mem_free(name);
         }
         plist_free(val);
@@ -213,21 +228,19 @@ extern "C" {
 - (void)onHeartbeatTimer {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         if (!_heartbeat) return;
-
-        [self log:@"Sending Heartbeat Polo..."];
+        [self log:@"Heartbeat Polo..."];
         struct IdeviceFfiError *err = heartbeat_send_polo(_heartbeat);
         if (err) {
-            [self log:[NSString stringWithFormat:@"Heartbeat Polo FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
+            [self log:[NSString stringWithFormat:@"Polo FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
             idevice_error_free(err);
         } else {
-            [self log:@"Receiving Heartbeat Marco..."];
             uint64_t interval = 0;
             err = heartbeat_get_marco(_heartbeat, 1000, &interval);
             if (err) {
-                [self log:[NSString stringWithFormat:@"Heartbeat Marco FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
+                [self log:[NSString stringWithFormat:@"Marco FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
                 idevice_error_free(err);
             } else {
-                [self log:[NSString stringWithFormat:@"Heartbeat OK (Interval: %llu)", interval]];
+                [self log:[NSString stringWithFormat:@"Heartbeat OK (%llu)", interval]];
             }
         }
     });
