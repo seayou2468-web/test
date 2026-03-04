@@ -1,7 +1,11 @@
 #import "./ViewController.h"
-#import "./idevice.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+
+extern "C" {
+#import "./idevice.h"
+}
 
 // Using a small C++ feature to satisfy "objc++" and "c++"
 #include <string>
@@ -42,9 +46,9 @@
 }
 
 - (void)selectPairingFile {
-    // For iOS 14+ we should use initForOpeningContentTypes: but for simplicity and compatibility we use the older one
-    // as it doesn't require extra frameworks like UniformTypeIdentifiers in the basic form.
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.item"] inMode:UIDocumentPickerModeImport];
+    // iOS 14+ / iOS 26 initializer
+    UTType *itemType = UTTypeItem;
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[itemType] asCopy:YES];
     picker.delegate = self;
     [self presentViewController:picker animated:YES completion:nil];
 }
@@ -87,7 +91,6 @@
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
     struct IdeviceProviderHandle *provider = NULL;
-    // Note: using relative path style in thought but here it's just a label
     err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, pairingFile, "test-app", &provider);
     if (err) {
         [self log:[NSString stringWithFormat:@"Error creating provider: %s (code: %d)", err->message, err->code]];
