@@ -31,9 +31,10 @@ extern "C" {
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray<NSDictionary *> *appList;
 @property (nonatomic, strong) NSTimer *keepAliveTimer;
-@end
+@property (nonatomic, strong) UISegmentedControl *segmentedControl;
 @property (nonatomic, strong) NSDictionary *selectedAppDetails;
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *detailSections;
+@end
 
 @implementation ViewController
 
