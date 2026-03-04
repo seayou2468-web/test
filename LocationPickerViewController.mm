@@ -37,6 +37,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.navigationController.interactivePopGestureRecognizer.enabled = NO;
     self.title = @"Location Simulation";
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     self.waypoints = [NSMutableArray array];
@@ -408,6 +409,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 
 - (void)doneTapped {
     [self stopSimulation];
+    self.navigationController.interactivePopGestureRecognizer.enabled = YES;
     [self.navigationController popViewControllerAnimated:YES];
 }
 

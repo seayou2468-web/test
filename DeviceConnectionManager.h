@@ -28,5 +28,6 @@ extern "C" {
 - (void)fetchIconForBundleId:(NSString *)bundleId completion:(void (^)(UIImage *))completion;
 - (void)simulateLocationWithLatitude:(double)lat longitude:(double)lon;
 - (void)clearSimulatedLocation;
+- (void)afcListDirectory:(NSString *)path completion:(void (^)(NSArray *items, NSError *error))completion;
 
 @end

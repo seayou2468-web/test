@@ -11,6 +11,7 @@
 @property (nonatomic, strong) UIButton *connectButton;
 @property (nonatomic, strong) UIButton *disconnectButton;
 @property (nonatomic, strong) UIButton *locationButton;
+@property (nonatomic, strong) UIButton *afcButton;
 @property (nonatomic, strong) NSCache<NSString *, UIImage *> *iconCache;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray<NSDictionary *> *appList;
@@ -85,6 +86,7 @@
     self.locationButton.layer.cornerRadius = 10;
     [self.locationButton addTarget:self action:@selector(showLocationPicker) forControlEvents:UIControlEventTouchUpInside];
     self.locationButton.enabled = NO;
+            self.afcButton.enabled = NO;
     self.locationButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.locationButton];
 
@@ -121,8 +123,13 @@
 
         [self.locationButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
         [self.locationButton.leadingAnchor constraintEqualToAnchor:self.view.centerXAnchor constant:5],
-        [self.locationButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.locationButton.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.4],
         [self.locationButton.heightAnchor constraintEqualToConstant:50],
+
+        [self.afcButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
+        [self.afcButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.afcButton.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.4],
+        [self.afcButton.heightAnchor constraintEqualToConstant:50],
     ]];
 
     [self managerDidLog:@"[INIT] Ready. Select a pairing file to connect."];
@@ -145,6 +152,12 @@
     [self.navigationController pushViewController:picker animated:YES];
 }
 
+- (void)showAFC {
+    AFCViewController *afc = [[AFCViewController alloc] init];
+    afc.connectionManager = self.connectionManager;
+    [self.navigationController pushViewController:afc animated:YES];
+}
+
 #pragma mark - UIDocumentPickerDelegate
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
@@ -165,6 +178,7 @@
             self.connectButton.enabled = NO;
             self.disconnectButton.enabled = YES;
             self.locationButton.enabled = YES;
+            self.afcButton.enabled = YES;
             [self.connectionManager connectWithData:data];
         });
     });
@@ -190,10 +204,12 @@
             self.connectButton.enabled = YES;
             self.disconnectButton.enabled = NO;
             self.locationButton.enabled = NO;
+            self.afcButton.enabled = NO;
         } else if ([status isEqualToString:@"Connected"]) {
             self.connectButton.enabled = NO;
             self.disconnectButton.enabled = YES;
             self.locationButton.enabled = YES;
+            self.afcButton.enabled = YES;
         }
     });
 }
