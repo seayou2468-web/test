@@ -99,7 +99,7 @@ extern "C" {
 
 - (void)cleanupInternal {
     [self log:@"[CLEANUP] Invalidating timers and freeing handles..."];
-    [[UIApplication sharedApplication] setIdleTimerDisabled:NO];
+    dispatch_async(dispatch_get_main_queue(), ^{ [[UIApplication sharedApplication] setIdleTimerDisabled:NO]; });
     if (self.heartbeatTimer) { [self.heartbeatTimer invalidate]; self.heartbeatTimer = nil; }
     if (self.keepAliveTimer) { [self.keepAliveTimer invalidate]; self.keepAliveTimer = nil; }
 
@@ -131,29 +131,38 @@ extern "C" {
     if (!url) return;
 
     [self log:[NSString stringWithFormat:@"[PICKER] Selected: %@", [url lastPathComponent]]];
-    BOOL canAccess = [url startAccessingSecurityScopedResource];
-    NSError *error = nil;
-    NSData *data = [NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:&error];
-    if (canAccess) [url stopAccessingSecurityScopedResource];
-
-    if (!data) {
-        [self log:[NSString stringWithFormat:@"[ERROR] NSData READ FAILED: %@", error.localizedDescription]];
-        return;
-    }
-
-    [self log:[NSString stringWithFormat:@"[PICKER] Data loaded into memory (%lu bytes).", (unsigned long)data.length]];
-    [self updateStatus:@"Starting..." color:[UIColor orangeColor]];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.connectButton setEnabled:NO];
-        [self.disconnectButton setEnabled:YES];
-    });
+    [self updateStatus:@"Loading Data..." color:[UIColor orangeColor]];
 
     dispatch_async(_connectionQueue, ^{
+        BOOL canAccess = [url startAccessingSecurityScopedResource];
+        NSError *error = nil;
+        NSData *data = [NSData dataWithContentsOfURL:url options:0 error:&error];
+        if (canAccess) [url stopAccessingSecurityScopedResource];
+
+        if (!data) {
+            [self log:[NSString stringWithFormat:@"[ERROR] NSData READ FAILED: %@", error.localizedDescription]];
+            [self updateStatus:@"Read Error" color:[UIColor redColor]];
+            return;
+        }
+
+        [self log:[NSString stringWithFormat:@"[PICKER] Data loaded into memory (%lu bytes).", (unsigned long)data.length]];
+        if (data.length > 8) {
+            char header[9];
+            [data getBytes:header length:8];
+            header[8] = '\0';
+            [self log:[NSString stringWithFormat:@"[PICKER] File Header Preview: %s", header]];
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.connectButton setEnabled:NO];
+            [self.disconnectButton setEnabled:YES];
+        });
+
         self->_activeToken++;
         [self performConnectWithData:data withToken:self->_activeToken];
     });
-}
 
+}
 // FIX: Renamed method to match call site 'performConnectWithData:withToken:'
 - (void)performConnectWithData:(NSData *)data withToken:(NSInteger)token {
     [self log:[NSString stringWithFormat:@"[CONN] Starting sequence (Token: %ld)", (long)token]];
