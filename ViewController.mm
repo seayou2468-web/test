@@ -369,6 +369,7 @@ extern "C" {
         [infoSummary appendString:@"----------------"];
         [self log:infoSummary];
     });
+}
 - (void)segmentChanged:(UISegmentedControl *)sender {
     if (sender.selectedSegmentIndex == 0) {
         self.logView.hidden = NO;
@@ -513,8 +514,6 @@ extern "C" {
 
 - (void)dismissDetails {
     [self dismissViewControllerAnimated:YES completion:nil];
-}
-
 }
 
 
