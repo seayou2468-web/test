@@ -135,7 +135,8 @@ extern "C" {
     if (!err && data) {
         [self log:[NSString stringWithFormat:@"Pairing file size: %lu bytes", (unsigned long)size]];
         plist_t plist = NULL;
-        if (plist_from_memory((const char *)data, (uint32_t)size, &plist) == PLIST_ERR_SUCCESS) {
+        plist_format_t format = PLIST_FORMAT_NONE;
+        if (plist_from_memory((const char *)data, (uint32_t)size, &plist, &format) == PLIST_ERR_SUCCESS) {
             plist_t hostIDNode = plist_dict_get_item(plist, "HostID");
             if (hostIDNode) {
                 char *hostID = NULL;
