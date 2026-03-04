@@ -11,6 +11,11 @@
     struct SpringBoardServicesClientHandle *_springboard;
     struct InstallationProxyClientHandle *_instproxy;
     struct LocationSimulationServiceHandle *_locationSimulation;
+    struct CoreDeviceProxyHandle *_coreDeviceProxy;
+    struct AdapterHandle *_adapter;
+    struct RsdHandshakeHandle *_rsdHandshake;
+    struct RemoteServerHandle *_remoteServer;
+    struct LocationSimulationHandle *_locationSimulationNew;
     dispatch_queue_t _connectionQueue;
     NSInteger _activeToken;
     NSTimeInterval _lastLocationUpdate;}
@@ -222,6 +227,7 @@
     });
 }
 
+
 - (void)simulateLocationWithLatitude:(double)lat longitude:(double)lon {
     // Basic rate limiting to 10Hz to avoid overwhelming the device/queue
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
@@ -231,7 +237,64 @@
     dispatch_async(_connectionQueue, ^{
         if (!self->_provider) return;
         struct IdeviceFfiError *err = NULL;
-        if (!self->_locationSimulation) {
+
+        // Try modern CoreDevice/RemoteServer approach first (iOS 17+)
+        if (!self->_locationSimulationNew && !self->_locationSimulation) {
+            [self log:@"[LOC] Attempting CoreDevice connection..."];
+
+            struct CoreDeviceProxyHandle *proxy = NULL;
+            struct AdapterHandle *adapter = NULL;
+            struct RsdHandshakeHandle *rsd = NULL;
+            struct RemoteServerHandle *remoteServer = NULL;
+            struct LocationSimulationHandle *locSim = NULL;
+            uint16_t rsdPort = 0;
+
+            err = core_device_proxy_connect(self->_provider, &proxy);
+            if (!err && proxy) {
+                err = core_device_proxy_get_server_rsd_port(proxy, &rsdPort);
+                if (!err) {
+                    err = core_device_proxy_create_tcp_adapter(proxy, &adapter);
+                    if (!err && adapter) {
+                        proxy = NULL; // Consumed
+                        struct ReadWriteOpaque *stream = NULL;
+                        err = adapter_connect(adapter, rsdPort, &stream);
+                        if (!err && stream) {
+                            err = rsd_handshake_new(stream, &rsd);
+                            if (!err && rsd) {
+                                // stream is consumed
+                                err = remote_server_connect_rsd(adapter, rsd, &remoteServer);
+                                if (!err && remoteServer) {
+                                    err = location_simulation_new(remoteServer, &locSim);
+                                }
+                            } else if (stream) {
+                                idevice_stream_free(stream);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!err && locSim) {
+                self->_adapter = adapter;
+                self->_rsdHandshake = rsd;
+                self->_remoteServer = remoteServer;
+                self->_locationSimulationNew = locSim;
+            } else {
+                if (err) {
+                    [self log:[NSString stringWithFormat:@"[LOC] CoreDevice failed: %s (%d). Falling back to lockdown.", err->message, err->code]];
+                    idevice_error_free(err);
+                    err = NULL;
+                }
+                if (locSim) location_simulation_free(locSim);
+                if (remoteServer) remote_server_free(remoteServer);
+                if (rsd) rsd_handshake_free(rsd);
+                if (adapter) adapter_free(adapter);
+                if (proxy) core_device_proxy_free(proxy);
+            }
+        }
+
+        // Fallback to legacy lockdown if modern approach failed or is not available
+        if (!self->_locationSimulationNew && !self->_locationSimulation) {
             err = lockdown_location_simulation_connect(self->_provider, &self->_locationSimulation);
             if (err) {
                 [self log:[NSString stringWithFormat:@"[LOC] Connect failed: %s (%d)", err->message, err->code]];
@@ -240,22 +303,40 @@
             }
         }
 
-        NSString *latStr = [NSString stringWithFormat:@"%.6f", lat];
-        NSString *lonStr = [NSString stringWithFormat:@"%.6f", lon];
-        err = lockdown_location_simulation_set(self->_locationSimulation, [latStr UTF8String], [lonStr UTF8String]);
-        if (err) {
-            [self log:[NSString stringWithFormat:@"[LOC] Set failed: %s (%d)", err->message, err->code]];
-            idevice_error_free(err);
-        } else {
-            [self log:[NSString stringWithFormat:@"[LOC] Simulated to %@, %@", latStr, lonStr]];
+        if (self->_locationSimulationNew) {
+            err = location_simulation_set(self->_locationSimulationNew, lat, lon);
+            if (err) {
+                [self log:[NSString stringWithFormat:@"[LOC] Modern Set failed: %s (%d)", err->message, err->code]];
+                idevice_error_free(err);
+            } else {
+                [self log:[NSString stringWithFormat:@"[LOC] Simulated (Modern) to %.6f, %.6f", lat, lon]];
+            }
+        } else if (self->_locationSimulation) {
+            NSString *latStr = [NSString stringWithFormat:@"%.6f", lat];
+            NSString *lonStr = [NSString stringWithFormat:@"%.6f", lon];
+            err = lockdown_location_simulation_set(self->_locationSimulation, [latStr UTF8String], [lonStr UTF8String]);
+            if (err) {
+                [self log:[NSString stringWithFormat:@"[LOC] Legacy Set failed: %s (%d)", err->message, err->code]];
+                idevice_error_free(err);
+            } else {
+                [self log:[NSString stringWithFormat:@"[LOC] Simulated (Legacy) to %@, %@", latStr, lonStr]];
+            }
         }
     });
 }
 
+
 - (void)clearSimulatedLocation {
     dispatch_async(_connectionQueue, ^{
-        if (!self->_locationSimulation) return;
-        struct IdeviceFfiError *err = lockdown_location_simulation_clear(self->_locationSimulation);
+        struct IdeviceFfiError *err = NULL;
+        if (self->_locationSimulationNew) {
+            err = location_simulation_clear(self->_locationSimulationNew);
+        } else if (self->_locationSimulation) {
+            err = lockdown_location_simulation_clear(self->_locationSimulation);
+        } else {
+            return;
+        }
+
         if (err) {
             [self log:[NSString stringWithFormat:@"[LOC] Clear failed: %s (%d)", err->message, err->code]];
             idevice_error_free(err);
@@ -271,6 +352,11 @@
     if (self.keepAliveTimer) { [self.keepAliveTimer invalidate]; self.keepAliveTimer = nil; }
     if (_springboard) { springboard_services_free(_springboard); _springboard = NULL; }
     if (_instproxy) { installation_proxy_client_free(_instproxy); _instproxy = NULL; }
+    if (_locationSimulationNew) { location_simulation_free(_locationSimulationNew); _locationSimulationNew = NULL; }
+    if (_remoteServer) { remote_server_free(_remoteServer); _remoteServer = NULL; }
+    if (_rsdHandshake) { rsd_handshake_free(_rsdHandshake); _rsdHandshake = NULL; }
+    if (_adapter) { adapter_free(_adapter); _adapter = NULL; }
+    if (_coreDeviceProxy) { core_device_proxy_free(_coreDeviceProxy); _coreDeviceProxy = NULL; }
     if (_locationSimulation) { lockdown_location_simulation_free(_locationSimulation); _locationSimulation = NULL; }
     if (_heartbeat) { heartbeat_client_free(_heartbeat); _heartbeat = NULL; }
     if (_lockdown) { lockdownd_client_free(_lockdown); _lockdown = NULL; }
