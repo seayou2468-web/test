@@ -493,21 +493,15 @@ extern "C" {
             }];
         }
         return cell;
-    } else {
-        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"DetailCell"];
-        if (!cell) {
-            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"DetailCell"];
-            cell.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-            cell.textLabel.font = [UIFont boldSystemFontOfSize:12];
-            cell.detailTextLabel.font = [UIFont fontWithName:@"Menlo" size:12] ?: [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
-            cell.detailTextLabel.numberOfLines = 0;
-        }
+    }
+}
 
         NSString *key = self.detailSections[indexPath.section][indexPath.row];
         cell.textLabel.text = key;
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%@", self.selectedAppDetails[key] ?: @"N/A"];
         return cell;
     }
+}
 }
 
 #pragma mark - UITableViewDelegate
@@ -563,7 +557,6 @@ extern "C" {
     detailVC.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissDetails)];
     [self presentViewController:nav animated:YES completion:nil];
 }
-
 - (void)dismissDetails {
     [self dismissViewControllerAnimated:YES completion:nil];
 }
