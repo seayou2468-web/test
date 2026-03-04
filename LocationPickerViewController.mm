@@ -232,7 +232,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.placeholder = @"Latitude"; tf.keyboardType = UIKeyboardTypeDecimalPad; }];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.placeholder = @"Longitude"; tf.keyboardType = UIKeyboardTypeDecimalPad; }];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Set" style:UIAlertActionActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:@"Set" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         double lat = [alert.textFields[0].text doubleValue];
         double lon = [alert.textFields[1].text doubleValue];
         CLLocationCoordinate2D coord = CLLocationCoordinate2DMake(lat, lon);
@@ -245,7 +245,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         [self.delegate didSelectLocation:coord];
         [self updateStatus];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -288,8 +288,8 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 - (void)calculateAndStartRoadRoute {
     if (self.waypoints.count < 2) return;
     MKDirectionsRequest *request = [[MKDirectionsRequest alloc] init];
-    request.source = [[MKMapItem alloc] initWithPlacemark:[[MKPlacemark alloc] initWithCoordinate:self.waypoints[0].coordinate]];
-    request.destination = [[MKMapItem alloc] initWithPlacemark:[[MKPlacemark alloc] initWithCoordinate:self.waypoints.lastObject.coordinate]];
+    request.source = [[MKMapItem alloc] initWithLocation:[[CLLocation alloc] initWithLatitude:self.waypoints[0].coordinate.latitude longitude:self.waypoints[0].coordinate.longitude] address:nil];
+    request.destination = [[MKMapItem alloc] initWithLocation:[[CLLocation alloc] initWithLatitude:self.waypoints.lastObject.coordinate.latitude longitude:self.waypoints.lastObject.coordinate.longitude] address:nil];
     request.transportType = MKDirectionsTransportTypeAutomobile;
 
     MKDirections *directions = [[MKDirections alloc] initWithRequest:request];
