@@ -1,4 +1,5 @@
 #import "AFCViewController.h"
+#import "AFCEditorViewController.h"
 
 @interface AFCViewController () {
     UITableView *_tableView;

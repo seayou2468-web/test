@@ -122,25 +122,25 @@
         [self.logView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
         [self.logView.bottomAnchor constraintEqualToAnchor:self.connectButton.topAnchor constant:-10],
 
-        [self.connectButton.bottomAnchor constraintEqualToAnchor:self.disconnectButton.topAnchor constant:-10],
+        [self.connectButton.bottomAnchor constraintEqualToAnchor:self.locationButton.topAnchor constant:-10],
         [self.connectButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
         [self.connectButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
-        [self.connectButton.heightAnchor constraintEqualToConstant:50],
+        [self.connectButton.heightAnchor constraintEqualToConstant:40],
+
+        [self.locationButton.bottomAnchor constraintEqualToAnchor:self.afcButton.topAnchor constant:-10],
+        [self.locationButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.locationButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.locationButton.heightAnchor constraintEqualToConstant:40],
+
+        [self.afcButton.bottomAnchor constraintEqualToAnchor:self.disconnectButton.topAnchor constant:-10],
+        [self.afcButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.afcButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.afcButton.heightAnchor constraintEqualToConstant:40],
 
         [self.disconnectButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
         [self.disconnectButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [self.disconnectButton.trailingAnchor constraintEqualToAnchor:self.view.centerXAnchor constant:-5],
-        [self.disconnectButton.heightAnchor constraintEqualToConstant:50],
-
-        [self.locationButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
-        [self.locationButton.leadingAnchor constraintEqualToAnchor:self.view.centerXAnchor constant:5],
-        [self.locationButton.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.4],
-        [self.locationButton.heightAnchor constraintEqualToConstant:50],
-
-        [self.afcButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
-        [self.afcButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
-        [self.afcButton.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.4],
-        [self.afcButton.heightAnchor constraintEqualToConstant:50],
+        [self.disconnectButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.disconnectButton.heightAnchor constraintEqualToConstant:40],
     ]];
 
     [self managerDidLog:@"[INIT] Ready. Select a pairing file to connect."];

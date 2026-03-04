@@ -29,5 +29,7 @@ extern "C" {
 - (void)simulateLocationWithLatitude:(double)lat longitude:(double)lon;
 - (void)clearSimulatedLocation;
 - (void)afcListDirectory:(NSString *)path completion:(void (^)(NSArray *items, NSError *error))completion;
+- (void)afcReadFile:(NSString *)path completion:(void (^)(NSData *data, NSError *error))completion;
+- (void)afcWriteFile:(NSString *)path data:(NSData *)data completion:(void (^)(NSError *error))completion;
 
 @end
