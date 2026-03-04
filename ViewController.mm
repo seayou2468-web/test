@@ -27,11 +27,13 @@ extern "C" {
 @property (nonatomic, strong) UIButton *disconnectButton;
 @property (nonatomic, strong) NSCache<NSString *, UIImage *> *iconCache;
 @property (nonatomic, strong) NSTimer *heartbeatTimer;
-@property (nonatomic, strong) UISegmentedControl *segmentedControl;
+@property (nonatomic, strong) UITableView *detailsTableView;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray<NSDictionary *> *appList;
 @property (nonatomic, strong) NSTimer *keepAliveTimer;
 @end
+@property (nonatomic, strong) NSDictionary *selectedAppDetails;
+@property (nonatomic, strong) NSArray<NSArray<NSString *> *> *detailSections;
 
 @implementation ViewController
 
@@ -443,43 +445,68 @@ extern "C" {
 
 #pragma mark - UITableViewDataSource
 
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    if (tableView == self.tableView) return 1;
+    return self.detailSections.count;
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return self.appList.count;
+    if (tableView == self.tableView) return self.appList.count;
+    return self.detailSections[section].count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (tableView == self.tableView) return nil;
+    NSArray *headers = @[@"IDENTIFICATION", @"LOCATIONS", @"EXTRAS"];
+    return headers[section];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"AppCell"];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"AppCell"];
-        cell.backgroundColor = [UIColor clearColor];
-        cell.textLabel.font = [UIFont boldSystemFontOfSize:14];
-        cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    }
+    if (tableView == self.tableView) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"AppCell"];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"AppCell"];
+            cell.backgroundColor = [UIColor clearColor];
+            cell.textLabel.font = [UIFont boldSystemFontOfSize:14];
+            cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        }
 
-    NSDictionary *app = self.appList[indexPath.row];
-    cell.textLabel.text = app[@"CFBundleDisplayName"] ?: app[@"CFBundleName"] ?: @"Unknown";
-    cell.detailTextLabel.text = app[@"CFBundleIdentifier"];
-
-    NSString *bundleId = app[@"CFBundleIdentifier"];
-    UIImage *cachedIcon = [self.iconCache objectForKey:bundleId];
-    if (cachedIcon) {
-        cell.imageView.image = cachedIcon;
+        NSDictionary *app = self.appList[indexPath.row];
+        cell.textLabel.text = app[@"CFBundleDisplayName"] ?: app[@"CFBundleName"] ?: @"Unknown";
+        cell.detailTextLabel.text = app[@"CFBundleIdentifier"];
+        NSString *bundleId = app[@"CFBundleIdentifier"];
+        UIImage *cachedIcon = [self.iconCache objectForKey:bundleId];
+        if (cachedIcon) {
+            cell.imageView.image = cachedIcon;
+        } else {
+            cell.imageView.image = [UIImage systemImageNamed:@"app.dashed"];
+            [self fetchIconForBundleId:bundleId completion:^(UIImage *icon) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    UITableViewCell *updateCell = [tableView cellForRowAtIndexPath:indexPath];
+                    if (updateCell) {
+                        updateCell.imageView.image = icon;
+                        [updateCell setNeedsLayout];
+                    }
+                });
+            }];
+        }
+        return cell;
     } else {
-        cell.imageView.image = [UIImage systemImageNamed:@"app.dashed"];
-        [self fetchIconForBundleId:bundleId completion:^(UIImage *icon) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                UITableViewCell *updateCell = [tableView cellForRowAtIndexPath:indexPath];
-                if (updateCell) {
-                    updateCell.imageView.image = icon;
-                    [updateCell setNeedsLayout];
-                }
-            });
-        }];
-    }
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"DetailCell"];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"DetailCell"];
+            cell.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+            cell.textLabel.font = [UIFont boldSystemFontOfSize:12];
+            cell.detailTextLabel.font = [UIFont fontWithName:@"Menlo" size:12] ?: [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+            cell.detailTextLabel.numberOfLines = 0;
+        }
 
-    return cell;
-}
+        NSString *key = self.detailSections[indexPath.section][indexPath.row];
+        cell.textLabel.text = key;
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@", self.selectedAppDetails[key] ?: @"N/A"];
+        return cell;
+    }
 
 #pragma mark - UITableViewDelegate
 
@@ -489,74 +516,51 @@ extern "C" {
     [self showAppDetails:app];
 }
 - (void)showAppDetails:(NSDictionary *)app {
+    self.selectedAppDetails = app;
+    self.detailSections = @[
+        @[@"CFBundleIdentifier", @"ApplicationType"],
+        @[@"Path", @"Container"],
+        @[@"Entitlements"]
+    ];
+
     UIViewController *detailVC = [[UIViewController alloc] init];
-    detailVC.title = app[@"CFBundleDisplayName"] ?: app[@"CFBundleName"] ?: @"App Details";
+    detailVC.title = @"App Details";
     detailVC.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
 
-    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:detailVC.view.bounds];
-    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [detailVC.view addSubview:scrollView];
+    UITableView *tv = [[UITableView alloc] initWithFrame:detailVC.view.bounds style:UITableViewStyleGrouped];
+    tv.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    tv.delegate = self;
+    tv.dataSource = self;
+    [detailVC.view addSubview:tv];
 
-    UIStackView *stackView = [[UIStackView alloc] init];
-    stackView.axis = UILayoutConstraintAxisVertical;
-    stackView.spacing = 15;
-    stackView.alignment = UIStackViewAlignmentFill;
-    stackView.distribution = UIStackViewDistributionEqualSpacing;
-    stackView.translatesAutoresizingMaskIntoConstraints = NO;
-    [scrollView addSubview:stackView];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [stackView.topAnchor constraintEqualToAnchor:scrollView.topAnchor constant:20],
-        [stackView.leadingAnchor constraintEqualToAnchor:detailVC.view.leadingAnchor constant:20],
-        [stackView.trailingAnchor constraintEqualToAnchor:detailVC.view.trailingAnchor constant:-20],
-        [stackView.bottomAnchor constraintEqualToAnchor:scrollView.bottomAnchor constant:-20]
-    ]];
-
-    // Header
-    UIImageView *iconView = [[UIImageView alloc] init];
+    // Header View
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, detailVC.view.bounds.size.width, 180)];
+    UIImageView *iconView = [[UIImageView alloc] initWithFrame:CGRectMake((header.bounds.size.width-80)/2, 20, 80, 80)];
     iconView.image = [self.iconCache objectForKey:app[@"CFBundleIdentifier"]] ?: [UIImage systemImageNamed:@"app.dashed"];
     iconView.contentMode = UIViewContentModeScaleAspectFit;
-    [[iconView heightAnchor] constraintEqualToConstant:100].active = YES;
-    [stackView addArrangedSubview:iconView];
+    iconView.layer.cornerRadius = 16;
+    iconView.clipsToBounds = YES;
+    [header addSubview:iconView];
 
-    UILabel *nameLabel = [[UILabel alloc] init];
-    nameLabel.text = detailVC.title;
-    nameLabel.font = [UIFont boldSystemFontOfSize:22];
+    UILabel *nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 110, header.bounds.size.width-40, 30)];
+    nameLabel.text = app[@"CFBundleDisplayName"] ?: app[@"CFBundleName"] ?: @"Unknown";
+    nameLabel.font = [UIFont boldSystemFontOfSize:20];
     nameLabel.textAlignment = NSTextAlignmentCenter;
-    [stackView addArrangedSubview:nameLabel];
+    [header addSubview:nameLabel];
 
-    UILabel *verLabel = [[UILabel alloc] init];
+    UILabel *verLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 140, header.bounds.size.width-40, 20)];
     verLabel.text = [NSString stringWithFormat:@"Version: %@", app[@"CFBundleShortVersionString"] ?: app[@"CFBundleVersion"] ?: @"N/A"];
-    verLabel.font = [UIFont systemFontOfSize:16];
+    verLabel.font = [UIFont systemFontOfSize:14];
     verLabel.textColor = [UIColor secondaryLabelColor];
     verLabel.textAlignment = NSTextAlignmentCenter;
-    [stackView addArrangedSubview:verLabel];
+    [header addSubview:verLabel];
 
-    UIView *separator = [[UIView alloc] init];
-    separator.backgroundColor = [UIColor separatorColor];
-    [[separator heightAnchor] constraintEqualToConstant:1].active = YES;
-    [stackView addArrangedSubview:separator];
-
-    // Details
-    NSArray *displayKeys = @[@"CFBundleIdentifier", @"Path", @"Container", @"ApplicationType", @"Entitlements"];
-    for (NSString *key in displayKeys) {
-        if (app[key]) {
-            UILabel *keyLabel = [[UILabel alloc] init];
-            keyLabel.text = key;
-            keyLabel.font = [UIFont boldSystemFontOfSize:12];
-            keyLabel.textColor = [UIColor systemBlueColor];
-            [stackView addArrangedSubview:keyLabel];
-
-            UILabel *valLabel = [[UILabel alloc] init];
-            valLabel.text = [NSString stringWithFormat:@"%@", app[key]];
-            valLabel.font = [UIFont fontWithName:@"Menlo" size:12] ?: [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
-            valLabel.numberOfLines = 0;
-            [stackView addArrangedSubview:valLabel];
-        }
-    }
+    tv.tableHeaderView = header;
 
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:detailVC];
     detailVC.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissDetails)];
+    [self presentViewController:nav animated:YES completion:nil];
+}
     [self presentViewController:nav animated:YES completion:nil];
 }
 
