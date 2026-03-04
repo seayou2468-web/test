@@ -238,6 +238,7 @@ extern "C" {
         return;
     }
     [self log:@"[OK] Session established (Encrypted phase active)."];
+    [self fetchDeviceInfo:token];
 
     if (!check()) return;
     [self log:@"[STEP 5] Calling heartbeat_connect..."];
@@ -305,5 +306,34 @@ extern "C" {
         }
     });
 }
+- (void)fetchDeviceInfo:(NSInteger)token {
+    dispatch_async(_connectionQueue, ^{
+        if (self->_activeToken != token || !self->_lockdown) return;
+        [self log:@"[INFO] Fetching detailed device information..."];
+
+        NSArray *keys = @[@"DeviceName", @"ProductVersion", @"ProductType", @"UniqueDeviceID", @"SerialNumber", @"CPUArchitecture", @"DeviceClass"];
+        NSMutableString *infoSummary = [NSMutableString stringWithString:@"\n--- DEVICE INFO ---\n"];
+
+        for (NSString *key in keys) {
+            plist_t val = NULL;
+            struct IdeviceFfiError *err = lockdownd_get_value(self->_lockdown, [key UTF8String], NULL, &val);
+            if (!err && val) {
+                char *cStr = NULL;
+                plist_get_string_val(val, &cStr);
+                if (cStr) {
+                    [infoSummary appendFormat:@"%@: %s\n", key, cStr];
+                    plist_mem_free(cStr);
+                }
+                plist_free(val);
+            } else {
+                if (err) idevice_error_free(err);
+                [infoSummary appendFormat:@"%@: [ERROR]\n", key];
+            }
+        }
+        [infoSummary appendString:@"------------------"];
+        [self log:infoSummary];
+    });
+}
+
 
 @end
