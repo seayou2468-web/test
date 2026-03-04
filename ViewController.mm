@@ -11,10 +11,6 @@ extern "C" {
 }
 #endif
 
-// C++ inclusions for ObjC++
-#include <string>
-#include <vector>
-
 @interface ViewController ()
 @property (nonatomic, strong) UITextView *logView;
 @property (nonatomic, strong) UIButton *connectButton;
@@ -25,7 +21,6 @@ extern "C" {
 - (void)viewDidLoad {
     [super viewDidLoad];
     [self.view setBackgroundColor:[UIColor whiteColor]];
-
     CGRect viewBounds = [[self view] bounds];
 
     self.logView = [[UITextView alloc] initWithFrame:CGRectMake(20, 100, viewBounds.size.width - 40, 400)];
@@ -40,7 +35,7 @@ extern "C" {
     [self.connectButton addTarget:self action:@selector(selectPairingFile) forControlEvents:UIControlEventTouchUpInside];
     [[self view] addSubview:self.connectButton];
 
-    [self log:@"App Initialized (iOS 26 Compatibility Mode)"];
+    [self log:@"App Initialized (Minimal Mode)"];
 }
 
 - (void)log:(NSString *)message {
@@ -50,13 +45,12 @@ extern "C" {
         NSString *newText = [currentText stringByAppendingFormat:@"%@\n", message];
         [self.logView setText:newText];
         [self.logView scrollRangeToVisible:NSMakeRange([newText length], 0)];
-        NSLog(@"%@", message);
+        NSLog(@"[LOG] %@", message);
     });
 }
 
 - (void)selectPairingFile {
-    NSArray *types = [NSArray arrayWithObject:UTTypeItem];
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:[NSArray arrayWithObject:UTTypeItem] asCopy:YES];
     [picker setDelegate:self];
     [self presentViewController:picker animated:YES completion:nil];
 }
@@ -66,44 +60,32 @@ extern "C" {
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url = [urls firstObject];
     if (url) {
+        NSString *path = [[url path] copy];
+        [self log:[NSString stringWithFormat:@"File picked: %@", path]];
         BOOL canAccess = [url startAccessingSecurityScopedResource];
-        [self log:[NSString stringWithFormat:@"Selected file: %@", [url path]]];
-        [self startConnectionWithURL:url accessGranted:canAccess];
+
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            [self performConnect:path];
+            if (canAccess) {
+                [url stopAccessingSecurityScopedResource];
+            }
+        });
     }
 }
 
-- (void)startConnectionWithURL:(NSURL *)url accessGranted:(BOOL)accessGranted {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        [self performConnectionWithURL:url];
-        if (accessGranted) {
-            [url stopAccessingSecurityScopedResource];
-        }
-    });
-}
-
-- (void)performConnectionWithURL:(NSURL *)url {
-    NSString *filePath = [url path];
+- (void)performConnect:(NSString *)filePath {
     struct IdevicePairingFile *pairingFile = NULL;
     struct IdeviceFfiError *err = NULL;
 
-    [self log:@"Reading pairing file..."];
+    [self log:@"STEP 1: idevice_pairing_file_read..."];
     err = idevice_pairing_file_read([filePath UTF8String], &pairingFile);
     if (err) {
-        [self log:[NSString stringWithFormat:@"Error reading pairing file: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
+        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
         if (err) idevice_error_free(err);
         return;
     }
 
-    // Diagnostic: verify pairing file content
-    uint8_t *serializedData = NULL;
-    uintptr_t serializedSize = 0;
-    idevice_pairing_file_serialize(pairingFile, &serializedData, &serializedSize);
-    if (serializedData) {
-        [self log:[NSString stringWithFormat:@"Pairing file read successfully (%lu bytes)", (unsigned long)serializedSize]];
-        idevice_outer_slice_free(serializedData, serializedSize);
-    }
-
-    [self log:@"Creating TCP provider for 10.7.0.1..."];
+    [self log:@"STEP 2: idevice_tcp_provider_new..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
@@ -114,73 +96,51 @@ extern "C" {
     struct IdeviceProviderHandle *provider = NULL;
     err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, pairingFile, "test-app", &provider);
     if (err) {
-        [self log:[NSString stringWithFormat:@"Error creating provider: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
+        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
         if (err) idevice_error_free(err);
         if (pairingFile) idevice_pairing_file_free(pairingFile);
         return;
     }
 
-    [self log:@"Connecting to lockdown..."];
+    [self log:@"STEP 3: lockdownd_connect..."];
     struct LockdowndClientHandle *lockdown = NULL;
     err = lockdownd_connect(provider, &lockdown);
     if (err) {
-        [self log:[NSString stringWithFormat:@"Error connecting to lockdown: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
+        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
         if (err) idevice_error_free(err);
         if (provider) idevice_provider_free(provider);
         if (pairingFile) idevice_pairing_file_free(pairingFile);
         return;
     }
 
-    // Diagnostic: Try to get basic info before session
-    [self log:@"Connected. Attempting to get UniqueDeviceID..."];
-    plist_t udidValue = NULL;
-    struct IdeviceFfiError *udidErr = lockdownd_get_value(lockdown, "UniqueDeviceID", NULL, &udidValue);
-    if (!udidErr && udidValue) {
-        char *udid = NULL;
-        plist_get_string_val(udidValue, &udid);
-        if (udid) {
-            [self log:[NSString stringWithFormat:@"UniqueDeviceID: %s", udid]];
-            plist_mem_free(udid);
-        }
-        plist_free(udidValue);
-    } else {
-        if (udidErr) idevice_error_free(udidErr);
-    }
-
-    [self log:@"Starting session..."];
+    [self log:@"STEP 4: lockdownd_start_session..."];
     err = lockdownd_start_session(lockdown, pairingFile);
     if (err) {
-        [self log:[NSString stringWithFormat:@"Error starting session: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
-        if (err->code == -10) {
-            [self log:@"Note: InvalidHostID might mean the pairing file does not match this device."];
-        }
+        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
         if (err) idevice_error_free(err);
-        // Continue to cleanup
     } else {
-        [self log:@"Session started successfully! Getting DeviceName..."];
-        plist_t deviceNameValue = NULL;
-        err = lockdownd_get_value(lockdown, "DeviceName", NULL, &deviceNameValue);
+        [self log:@"STEP 5: lockdownd_get_value (DeviceName)..."];
+        plist_t val = NULL;
+        err = lockdownd_get_value(lockdown, "DeviceName", NULL, &val);
         if (err) {
-            [self log:[NSString stringWithFormat:@"Error getting DeviceName: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
+            [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
             if (err) idevice_error_free(err);
-        } else {
-            if (deviceNameValue) {
-                char *name = NULL;
-                plist_get_string_val(deviceNameValue, &name);
-                if (name) {
-                    [self log:[NSString stringWithFormat:@"Device Name: %s", name]];
-                    plist_mem_free(name);
-                }
-                plist_free(deviceNameValue);
+        } else if (val) {
+            char *name = NULL;
+            plist_get_string_val(val, &name);
+            if (name) {
+                [self log:[NSString stringWithFormat:@"SUCCESS: %s", name]];
+                plist_mem_free(name);
             }
+            plist_free(val);
         }
     }
 
-    [self log:@"Cleaning up..."];
+    [self log:@"STEP 6: cleanup..."];
     if (lockdown) lockdownd_client_free(lockdown);
     if (provider) idevice_provider_free(provider);
     if (pairingFile) idevice_pairing_file_free(pairingFile);
-    [self log:@"Done."];
+    [self log:@"DONE."];
 }
 
 @end
