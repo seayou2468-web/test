@@ -44,8 +44,9 @@ extern "C" {
 }
 
 - (void)log:(NSString *)message {
+    if (!message) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSString *currentText = [self.logView text];
+        NSString *currentText = [self.logView text] ?: @"";
         NSString *newText = [currentText stringByAppendingFormat:@"%@\n", message];
         [self.logView setText:newText];
         [self.logView scrollRangeToVisible:NSMakeRange([newText length], 0)];
@@ -65,12 +66,8 @@ extern "C" {
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url = [urls firstObject];
     if (url) {
-        // Critical for UIDocumentPicker on iOS
         BOOL canAccess = [url startAccessingSecurityScopedResource];
         [self log:[NSString stringWithFormat:@"Selected file: %@", [url path]]];
-
-        // We need to pass the URL or handle the data while access is granted.
-        // For simplicity, we'll read the pairing file now or pass the URL.
         [self startConnectionWithURL:url accessGranted:canAccess];
     }
 }
@@ -92,7 +89,7 @@ extern "C" {
     [self log:@"Reading pairing file..."];
     err = idevice_pairing_file_read([filePath UTF8String], &pairingFile);
     if (err) {
-        [self log:[NSString stringWithFormat:@"Error reading pairing file: %s (code: %d)", err->message, err->code]];
+        [self log:[NSString stringWithFormat:@"Error reading pairing file: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
         idevice_error_free(err);
         return;
     }
@@ -100,6 +97,7 @@ extern "C" {
     [self log:@"Creating TCP provider for 10.7.0.1..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
+    addr.sin_len = sizeof(addr); // REQUIRED on iOS/macOS
     addr.sin_family = AF_INET;
     addr.sin_port = htons(LOCKDOWN_PORT);
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
@@ -107,9 +105,9 @@ extern "C" {
     struct IdeviceProviderHandle *provider = NULL;
     err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, pairingFile, "test-app", &provider);
     if (err) {
-        [self log:[NSString stringWithFormat:@"Error creating provider: %s (code: %d)", err->message, err->code]];
-        idevice_error_free(err);
-        idevice_pairing_file_free(pairingFile);
+        [self log:[NSString stringWithFormat:@"Error creating provider: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
+        if (err) idevice_error_free(err);
+        if (pairingFile) idevice_pairing_file_free(pairingFile);
         return;
     }
 
@@ -117,21 +115,21 @@ extern "C" {
     struct LockdowndClientHandle *lockdown = NULL;
     err = lockdownd_connect(provider, &lockdown);
     if (err) {
-        [self log:[NSString stringWithFormat:@"Error connecting to lockdown: %s (code: %d)", err->message, err->code]];
-        idevice_error_free(err);
-        idevice_provider_free(provider);
-        idevice_pairing_file_free(pairingFile);
+        [self log:[NSString stringWithFormat:@"Error connecting to lockdown: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
+        if (err) idevice_error_free(err);
+        if (provider) idevice_provider_free(provider);
+        if (pairingFile) idevice_pairing_file_free(pairingFile);
         return;
     }
 
     [self log:@"Starting session..."];
     err = lockdownd_start_session(lockdown, pairingFile);
     if (err) {
-        [self log:[NSString stringWithFormat:@"Error starting session: %s (code: %d)", err->message, err->code]];
-        idevice_error_free(err);
-        lockdownd_client_free(lockdown);
-        idevice_provider_free(provider);
-        idevice_pairing_file_free(pairingFile);
+        [self log:[NSString stringWithFormat:@"Error starting session: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
+        if (err) idevice_error_free(err);
+        if (lockdown) lockdownd_client_free(lockdown);
+        if (provider) idevice_provider_free(provider);
+        if (pairingFile) idevice_pairing_file_free(pairingFile);
         return;
     }
 
@@ -139,23 +137,26 @@ extern "C" {
     plist_t deviceNameValue = NULL;
     err = lockdownd_get_value(lockdown, "DeviceName", NULL, &deviceNameValue);
     if (err) {
-        [self log:[NSString stringWithFormat:@"Error getting DeviceName: %s (code: %d)", err->message, err->code]];
-        idevice_error_free(err);
+        [self log:[NSString stringWithFormat:@"Error getting DeviceName: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
+        if (err) idevice_error_free(err);
     } else {
-        char *name = NULL;
-        plist_get_string_val(deviceNameValue, &name);
-        if (name) {
-            [self log:[NSString stringWithFormat:@"Device Name: %s", name]];
-            // libplist usually requires plist_mem_free for its allocated strings
-            plist_mem_free(name);
+        if (deviceNameValue) {
+            char *name = NULL;
+            plist_get_string_val(deviceNameValue, &name);
+            if (name) {
+                [self log:[NSString stringWithFormat:@"Device Name: %s", name]];
+                plist_mem_free(name);
+            }
+            plist_free(deviceNameValue);
+        } else {
+            [self log:@"DeviceName value is NULL"];
         }
-        plist_free(deviceNameValue);
     }
 
     [self log:@"Cleaning up..."];
-    lockdownd_client_free(lockdown);
-    idevice_provider_free(provider);
-    idevice_pairing_file_free(pairingFile);
+    if (lockdown) lockdownd_client_free(lockdown);
+    if (provider) idevice_provider_free(provider);
+    if (pairingFile) idevice_pairing_file_free(pairingFile);
     [self log:@"Done."];
 }
 
