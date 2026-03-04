@@ -18,12 +18,14 @@ extern "C" {
     struct HeartbeatClientHandle *_heartbeat;
     dispatch_queue_t _connectionQueue;
     NSInteger _activeToken;
+    struct SpringBoardServicesClientHandle *_springboard;
     struct InstallationProxyClientHandle *_instproxy;
 }
 @property (nonatomic, strong) UITextView *logView;
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UIButton *connectButton;
 @property (nonatomic, strong) UIButton *disconnectButton;
+@property (nonatomic, strong) NSCache<NSString *, UIImage *> *iconCache;
 @property (nonatomic, strong) NSTimer *heartbeatTimer;
 @property (nonatomic, strong) UISegmentedControl *segmentedControl;
 @property (nonatomic, strong) UITableView *tableView;
@@ -38,11 +40,13 @@ extern "C" {
     [self.view setBackgroundColor:[UIColor systemGroupedBackgroundColor]];
     CGRect viewBounds = [[self view] bounds];
 
+    _springboard = NULL;
     _instproxy = NULL;
     _pairingFile = NULL;
     _provider = NULL;
     _lockdown = NULL;
     _heartbeat = NULL;
+    self.iconCache = [[NSCache alloc] init];
     _activeToken = 0;
     _connectionQueue = dispatch_queue_create("com.test.connectionQueue", DISPATCH_QUEUE_SERIAL);
 
@@ -128,6 +132,7 @@ extern "C" {
     if (self.heartbeatTimer) { [self.heartbeatTimer invalidate]; self.heartbeatTimer = nil; }
     if (self.keepAliveTimer) { [self.keepAliveTimer invalidate]; self.keepAliveTimer = nil; }
 
+    if (_springboard) { [self log:[NSString stringWithFormat:@"[CLEANUP] Freeing Springboard (%p)", _springboard]]; springboard_services_free(_springboard); _springboard = NULL; }
     if (_instproxy) { [self log:[NSString stringWithFormat:@"[CLEANUP] Freeing InstProxy (%p)", _instproxy]]; installation_proxy_client_free(_instproxy); _instproxy = NULL; }
     if (_heartbeat) { [self log:[NSString stringWithFormat:@"[CLEANUP] Freeing Heartbeat (%p)", _heartbeat]]; heartbeat_client_free(_heartbeat); _heartbeat = NULL; }
     if (_lockdown) { [self log:[NSString stringWithFormat:@"[CLEANUP] Freeing Lockdown (%p)", _lockdown]]; lockdownd_client_free(_lockdown); _lockdown = NULL; }
@@ -294,6 +299,16 @@ extern "C" {
         [self log:[NSString stringWithFormat:@"[OK] InstProxy connected (%p).", _instproxy]];
         if (err) { idevice_error_free(err); err = NULL; }
     }
+    if (!check()) return;
+    [self log:@"[STEP 8] Calling springboard_services_connect..."];
+    err = springboard_services_connect(_provider, &_springboard);
+    if (err || !_springboard) {
+        [self log:[NSString stringWithFormat:@"[WARN] Springboard connect failed: %s (%d)", err ? err->message : "NULL_ERR", err ? err->code : -1]];
+        if (err) { idevice_error_free(err); err = NULL; }
+    } else {
+        [self log:[NSString stringWithFormat:@"[OK] Springboard connected (%p).", _springboard]];
+        if (err) { idevice_error_free(err); err = NULL; }
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         if (check()) {
             self.keepAliveTimer = [NSTimer scheduledTimerWithTimeInterval:30.0 target:self selector:@selector(onKeepAliveTimer) userInfo:@(token) repeats:YES];
@@ -446,6 +461,23 @@ extern "C" {
     cell.textLabel.text = app[@"CFBundleDisplayName"] ?: app[@"CFBundleName"] ?: @"Unknown";
     cell.detailTextLabel.text = app[@"CFBundleIdentifier"];
 
+    NSString *bundleId = app[@"CFBundleIdentifier"];
+    UIImage *cachedIcon = [self.iconCache objectForKey:bundleId];
+    if (cachedIcon) {
+        cell.imageView.image = cachedIcon;
+    } else {
+        cell.imageView.image = [UIImage systemImageNamed:@"app.dashed"];
+        [self fetchIconForBundleId:bundleId completion:^(UIImage *icon) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UITableViewCell *updateCell = [tableView cellForRowAtIndexPath:indexPath];
+                if (updateCell) {
+                    updateCell.imageView.image = icon;
+                    [updateCell setNeedsLayout];
+                }
+            });
+        }];
+    }
+
     return cell;
 }
 
@@ -456,26 +488,73 @@ extern "C" {
     NSDictionary *app = self.appList[indexPath.row];
     [self showAppDetails:app];
 }
-
 - (void)showAppDetails:(NSDictionary *)app {
-    NSMutableString *details = [NSMutableString string];
-    NSArray *keys = [[app allKeys] sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-    for (NSString *key in keys) {
-        [details appendFormat:@"%@: %@\n\n", key, app[key]];
-    }
-
     UIViewController *detailVC = [[UIViewController alloc] init];
     detailVC.title = app[@"CFBundleDisplayName"] ?: app[@"CFBundleName"] ?: @"App Details";
     detailVC.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
 
-    UITextView *textView = [[UITextView alloc] initWithFrame:detailVC.view.bounds];
-    textView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    textView.editable = NO;
-    textView.text = details;
-    textView.font = [UIFont fontWithName:@"Menlo" size:12] ?: [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
-    textView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-    textView.contentInset = UIEdgeInsetsMake(20, 10, 20, 10);
-    [detailVC.view addSubview:textView];
+    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:detailVC.view.bounds];
+    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [detailVC.view addSubview:scrollView];
+
+    UIStackView *stackView = [[UIStackView alloc] init];
+    stackView.axis = UILayoutConstraintAxisVertical;
+    stackView.spacing = 15;
+    stackView.alignment = UIStackViewAlignmentFill;
+    stackView.distribution = UIStackViewDistributionEqualSpacing;
+    stackView.translatesAutoresizingMaskIntoConstraints = NO;
+    [scrollView addSubview:stackView];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [stackView.topAnchor constraintEqualToAnchor:scrollView.topAnchor constant:20],
+        [stackView.leadingAnchor constraintEqualToAnchor:detailVC.view.leadingAnchor constant:20],
+        [stackView.trailingAnchor constraintEqualToAnchor:detailVC.view.trailingAnchor constant:-20],
+        [stackView.bottomAnchor constraintEqualToAnchor:scrollView.bottomAnchor constant:-20]
+    ]];
+
+    // Header
+    UIImageView *iconView = [[UIImageView alloc] init];
+    iconView.image = [self.iconCache objectForKey:app[@"CFBundleIdentifier"]] ?: [UIImage systemImageNamed:@"app.dashed"];
+    iconView.contentMode = UIViewContentModeScaleAspectFit;
+    [iconView heightAnchor].active = YES;
+    [[iconView heightAnchor] constraintEqualToConstant:100].active = YES;
+    [stackView addArrangedSubview:iconView];
+
+    UILabel *nameLabel = [[UILabel alloc] init];
+    nameLabel.text = detailVC.title;
+    nameLabel.font = [UIFont boldSystemFontOfSize:22];
+    nameLabel.textAlignment = NSTextAlignmentCenter;
+    [stackView addArrangedSubview:nameLabel];
+
+    UILabel *verLabel = [[UILabel alloc] init];
+    verLabel.text = [NSString stringWithFormat:@"Version: %@", app[@"CFBundleShortVersionString"] ?: app[@"CFBundleVersion"] ?: @"N/A"];
+    verLabel.font = [UIFont systemFontOfSize:16];
+    verLabel.textColor = [UIColor secondaryLabelColor];
+    verLabel.textAlignment = NSTextAlignmentCenter;
+    [stackView addArrangedSubview:verLabel];
+
+    UIView *separator = [[UIView alloc] init];
+    separator.backgroundColor = [UIColor separatorColor];
+    [[separator heightAnchor] constraintEqualToConstant:1].active = YES;
+    [stackView addArrangedSubview:separator];
+
+    // Details
+    NSArray *displayKeys = @[@"CFBundleIdentifier", @"Path", @"Container", @"ApplicationType", @"Entitlements"];
+    for (NSString *key in displayKeys) {
+        if (app[key]) {
+            UILabel *keyLabel = [[UILabel alloc] init];
+            keyLabel.text = key;
+            keyLabel.font = [UIFont boldSystemFontOfSize:12];
+            keyLabel.textColor = [UIColor systemBlueColor];
+            [stackView addArrangedSubview:keyLabel];
+
+            UILabel *valLabel = [[UILabel alloc] init];
+            valLabel.text = [NSString stringWithFormat:@"%@", app[key]];
+            valLabel.font = [UIFont fontWithName:@"Menlo" size:12] ?: [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+            valLabel.numberOfLines = 0;
+            [stackView addArrangedSubview:valLabel];
+        }
+    }
 
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:detailVC];
     detailVC.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissDetails)];
@@ -496,6 +575,32 @@ extern "C" {
 
     plist_mem_free(xml);
     return obj;
+}
+
+- (void)fetchIconForBundleId:(NSString *)bundleId completion:(void (^)(UIImage *))completion {
+    dispatch_async(_connectionQueue, ^{
+        if (!self->_springboard) {
+            completion([UIImage systemImageNamed:@"app.dashed"]);
+            return;
+        }
+
+        void *data = NULL;
+        size_t len = 0;
+        struct IdeviceFfiError *err = springboard_services_get_icon(self->_springboard, [bundleId UTF8String], &data, &len);
+
+        UIImage *icon = nil;
+        if (!err && data && len > 0) {
+            NSData *pngData = [NSData dataWithBytes:data length:len];
+            icon = [UIImage imageWithData:pngData];
+            idevice_data_free((uint8_t *)data, (uintptr_t)len);
+        } else {
+            if (err) idevice_error_free(err);
+            icon = [UIImage systemImageNamed:@"app.dashed"];
+        }
+
+        if (icon) [self.iconCache setObject:icon forKey:bundleId];
+        completion(icon ?: [UIImage systemImageNamed:@"app.dashed"]);
+    });
 }
 
 
