@@ -354,11 +354,9 @@ extern "C" {
             plist_t val = NULL;
             struct IdeviceFfiError *err = lockdownd_get_value(self->_lockdown, [key UTF8String], NULL, &val);
             if (!err && val) {
-                char *cStr = NULL;
-                plist_get_string_val(val, &cStr);
-                if (cStr) {
-                    [infoSummary appendFormat:@"  %-16s: %s\n", [key UTF8String], cStr];
-                    plist_mem_free(cStr);
+                id obj = [self objectFromPlist:val];
+                if (obj) {
+                    [infoSummary appendFormat:@"  %-16s: %@\n", [key UTF8String], obj];
                 }
                 plist_free(val);
             } else {
@@ -405,39 +403,11 @@ extern "C" {
 
         for (size_t i = 0; i < len; i++) {
             plist_t appEntry = plistArray[i];
-            if (PLIST_IS_DICT(appEntry)) {
-                NSMutableDictionary *appDict = [NSMutableDictionary dictionary];
-                plist_dict_iter iter = NULL;
-                plist_dict_new_iter(appEntry, &iter);
-                char *key = NULL;
-                plist_t subval = NULL;
-                do {
-                    plist_dict_next_item(appEntry, iter, &key, &subval);
-                    if (key) {
-                        if (PLIST_IS_STRING(subval)) {
-                            char *s = NULL;
-                            plist_get_string_val(subval, &s);
-                            if (s) {
-                                appDict[[NSString stringWithUTF8String:key]] = [NSString stringWithUTF8String:s];
-                                plist_mem_free(s);
-                            }
-                        } else if (PLIST_IS_BOOLEAN(subval)) {
-                            uint8_t b = 0;
-                            plist_get_bool_val(subval, &b);
-                            appDict[[NSString stringWithUTF8String:key]] = @(b != 0);
-                        } else if (PLIST_IS_INT(subval)) {
-                            uint64_t u = 0;
-                            plist_get_uint_val(subval, &u);
-                            appDict[[NSString stringWithUTF8String:key]] = @(u);
-                        }
-                        plist_mem_free(key);
-                    }
-                } while (key);
-                plist_dict_free_iter(iter);
-                [apps addObject:appDict];
+            id obj = [self objectFromPlist:appEntry];
+            if ([obj isKindOfClass:[NSDictionary class]]) {
+                [apps addObject:obj];
             }
         }
-
         idevice_plist_array_free(plistArray, len);
 
         [apps sortUsingComparator:^NSComparisonResult(NSDictionary *obj1, NSDictionary *obj2) {
@@ -514,6 +484,18 @@ extern "C" {
 
 - (void)dismissDetails {
     [self dismissViewControllerAnimated:YES completion:nil];
+}
+- (id)objectFromPlist:(plist_t)plist {
+    if (!plist) return nil;
+    char *xml = NULL;
+    uint32_t len = 0;
+    if (plist_to_xml(plist, &xml, &len) != PLIST_ERR_SUCCESS || !xml) return nil;
+
+    NSData *data = [NSData dataWithBytesNoCopy:xml length:len freeWhenDone:NO];
+    id obj = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:NULL error:NULL];
+
+    plist_mem_free(xml);
+    return obj;
 }
 
 
