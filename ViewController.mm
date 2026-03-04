@@ -1,13 +1,17 @@
-#import "./ViewController.h"
+#import "ViewController.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
+#ifdef __cplusplus
 extern "C" {
-#import "./idevice.h"
+#endif
+#import "idevice.h"
+#ifdef __cplusplus
 }
+#endif
 
-// Using a small C++ feature to satisfy "objc++" and "c++"
+// C++ inclusions for ObjC++
 #include <string>
 #include <vector>
 
@@ -20,27 +24,31 @@ extern "C" {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [UIColor whiteColor];
+    [self.view setBackgroundColor:[UIColor whiteColor]];
 
-    self.logView = [[UITextView alloc] initWithFrame:CGRectMake(20, 100, self.view.bounds.size.width - 40, 400)];
-    self.logView.editable = NO;
-    self.logView.backgroundColor = [UIColor colorWithWhite:0.95 alpha:1.0];
-    self.logView.font = [UIFont systemFontOfSize:12];
-    [self.view addSubview:self.logView];
+    CGRect viewBounds = [[self view] bounds];
+
+    self.logView = [[UITextView alloc] initWithFrame:CGRectMake(20, 100, viewBounds.size.width - 40, 400)];
+    [self.logView setEditable:NO];
+    [self.logView setBackgroundColor:[UIColor colorWithWhite:0.95 alpha:1.0]];
+    [self.logView setFont:[UIFont systemFontOfSize:12]];
+    [[self view] addSubview:self.logView];
 
     self.connectButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.connectButton setTitle:@"Select Pairing File & Connect" forState:UIControlStateNormal];
-    [self.connectButton setFrame:CGRectMake(20, 520, self.view.bounds.size.width - 40, 50)];
+    [self.connectButton setFrame:CGRectMake(20, 520, viewBounds.size.width - 40, 50)];
     [self.connectButton addTarget:self action:@selector(selectPairingFile) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.connectButton];
+    [[self view] addSubview:self.connectButton];
 
     [self log:@"App Initialized (iOS 26 Compatibility Mode)"];
 }
 
 - (void)log:(NSString *)message {
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.logView.text = [self.logView.text stringByAppendingFormat:@"%@\n", message];
-        [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
+        NSString *currentText = [self.logView text];
+        NSString *newText = [currentText stringByAppendingFormat:@"%@\n", message];
+        [self.logView setText:newText];
+        [self.logView scrollRangeToVisible:NSMakeRange([newText length], 0)];
         NSLog(@"%@", message);
     });
 }
@@ -48,20 +56,21 @@ extern "C" {
 - (void)selectPairingFile {
     // iOS 14+ / iOS 26 initializer
     UTType *itemType = UTTypeItem;
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[itemType] asCopy:YES];
-    picker.delegate = self;
+    NSArray *types = [NSArray arrayWithObject:itemType];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
+    [picker setDelegate:self];
     [self presentViewController:picker animated:YES completion:nil];
 }
 
 #pragma mark - UIDocumentPickerDelegate
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    NSURL *url = urls.firstObject;
+    NSURL *url = [urls firstObject];
     if (url) {
-        // C++ string usage
-        std::string pathStr = [url.path UTF8String];
+        const char *utf8Path = [[url path] UTF8String];
+        std::string pathStr(utf8Path);
         [self log:[NSString stringWithFormat:@"Selected file: %s", pathStr.c_str()]];
-        [self startConnectionWithPairingFile:url.path];
+        [self startConnectionWithPairingFile:[url path]];
     }
 }
 
@@ -122,19 +131,19 @@ extern "C" {
     }
 
     [self log:@"Connection successful! Getting DeviceName..."];
-    plist_t deviceName = NULL;
-    err = lockdownd_get_value(lockdown, "DeviceName", NULL, &deviceName);
+    plist_t deviceNameValue = NULL;
+    err = lockdownd_get_value(lockdown, "DeviceName", NULL, &deviceNameValue);
     if (err) {
         [self log:[NSString stringWithFormat:@"Error getting DeviceName: %s (code: %d)", err->message, err->code]];
         idevice_error_free(err);
     } else {
         char *name = NULL;
-        plist_get_string_val(deviceName, &name);
+        plist_get_string_val(deviceNameValue, &name);
         if (name) {
-            [self log:[NSString stringWithFormat:@"Device Name: %s", name)];
+            [self log:[NSString stringWithFormat:@"Device Name: %s", name]];
             free(name);
         }
-        plist_free(deviceName);
+        plist_free(deviceNameValue);
     }
 
     [self log:@"Cleaning up..."];
