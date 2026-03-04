@@ -16,6 +16,7 @@
     struct RsdHandshakeHandle *_rsdHandshake;
     struct RemoteServerHandle *_remoteServer;
     struct LocationSimulationHandle *_locationSimulationNew;
+    struct AppServiceHandle *_appService;
     dispatch_queue_t _connectionQueue;
     NSInteger _activeToken;
     NSTimeInterval _lastLocationUpdate;}
@@ -188,42 +189,85 @@
 - (void)fetchAppList {
     NSInteger token = _activeToken;
     dispatch_async(_connectionQueue, ^{
-        if (self->_activeToken != token || !self->_instproxy) return;
-        void *result = NULL;
-        size_t len = 0;
-        struct IdeviceFfiError *err = installation_proxy_get_apps(self->_instproxy, NULL, NULL, 0, &result, &len);
-        if (!err && result) {
-            NSMutableArray *apps = [NSMutableArray array];
-            plist_t *plistArray = (plist_t *)result;
-            for (size_t i = 0; i < len; i++) {
-                id obj = [PlistUtils objectFromPlist:plistArray[i]];
-                if ([obj isKindOfClass:[NSDictionary class]]) [apps addObject:obj];
-            }
-            idevice_plist_array_free(plistArray, len);
-            [apps sortUsingComparator:^NSComparisonResult(NSDictionary *obj1, NSDictionary *obj2) {
-                NSString *name1 = obj1[@"CFBundleDisplayName"] ?: obj1[@"CFBundleName"] ?: @"";
-                NSString *name2 = obj2[@"CFBundleDisplayName"] ?: obj2[@"CFBundleName"] ?: @"";
-                return [name1 localizedCaseInsensitiveCompare:name2];
-            }];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self.delegate managerDidReceiveAppList:apps token:token];
-            });
-        } else if (err) idevice_error_free(err);
+        if (self->_activeToken != token) return;
+
+        if (self->_appService) {
+            struct AppListEntryC *appsC = NULL;
+            uintptr_t count = 0;
+            struct IdeviceFfiError *err = app_service_list_apps(self->_appService, 1, 1, 1, 1, 1, &appsC, &count);
+            if (!err && appsC) {
+                NSMutableArray *apps = [NSMutableArray array];
+                for (uintptr_t i = 0; i < count; i++) {
+                    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+                    if (appsC[i].name) dict[@"CFBundleDisplayName"] = [NSString stringWithUTF8String:appsC[i].name];
+                    if (appsC[i].bundle_identifier) dict[@"CFBundleIdentifier"] = [NSString stringWithUTF8String:appsC[i].bundle_identifier];
+                    if (appsC[i].version) dict[@"CFBundleShortVersionString"] = [NSString stringWithUTF8String:appsC[i].version];
+                    if (appsC[i].bundle_version) dict[@"CFBundleVersion"] = [NSString stringWithUTF8String:appsC[i].bundle_version];
+                    dict[@"ApplicationType"] = appsC[i].is_first_party ? @"System" : @"User";
+                    [apps addObject:dict];
+                }
+                app_service_free_app_list(appsC, count);
+                [apps sortUsingComparator:^NSComparisonResult(NSDictionary *obj1, NSDictionary *obj2) {
+                    return [obj1[@"CFBundleDisplayName"] localizedCaseInsensitiveCompare:obj2[@"CFBundleDisplayName"]];
+                }];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self.delegate managerDidReceiveAppList:apps token:token];
+                });
+                return;
+            } else if (err) idevice_error_free(err);
+        }
+
+        if (self->_instproxy) {
+            void *result = NULL;
+            size_t len = 0;
+            struct IdeviceFfiError *err = installation_proxy_get_apps(self->_instproxy, NULL, NULL, 0, &result, &len);
+            if (!err && result) {
+                NSMutableArray *apps = [NSMutableArray array];
+                plist_t *plistArray = (plist_t *)result;
+                for (size_t i = 0; i < len; i++) {
+                    id obj = [PlistUtils objectFromPlist:plistArray[i]];
+                    if ([obj isKindOfClass:[NSDictionary class]]) [apps addObject:obj];
+                }
+                idevice_plist_array_free(plistArray, len);
+                [apps sortUsingComparator:^NSComparisonResult(NSDictionary *obj1, NSDictionary *obj2) {
+                    NSString *name1 = obj1[@"CFBundleDisplayName"] ?: obj1[@"CFBundleName"] ?: @"";
+                    NSString *name2 = obj2[@"CFBundleDisplayName"] ?: obj2[@"CFBundleName"] ?: @"";
+                    return [name1 localizedCaseInsensitiveCompare:name2];
+                }];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self.delegate managerDidReceiveAppList:apps token:token];
+                });
+            } else if (err) idevice_error_free(err);
+        }
     });
 }
 
 - (void)fetchIconForBundleId:(NSString *)bundleId completion:(void (^)(UIImage *))completion {
     dispatch_async(_connectionQueue, ^{
-        if (!self->_springboard) { completion(nil); return; }
-        void *data = NULL;
-        size_t len = 0;
-        struct IdeviceFfiError *err = springboard_services_get_icon(self->_springboard, [bundleId UTF8String], &data, &len);
-        UIImage *icon = nil;
-        if (!err && data && len > 0) {
-            icon = [UIImage imageWithData:[NSData dataWithBytes:data length:len]];
-            idevice_data_free((uint8_t *)data, (uintptr_t)len);
-        } else if (err) idevice_error_free(err);
-        completion(icon);
+        if (self->_appService) {
+            struct IconDataC *iconData = NULL;
+            struct IdeviceFfiError *err = app_service_fetch_app_icon(self->_appService, [bundleId UTF8String], 60, 60, 2.0, 1, &iconData);
+            if (!err && iconData && iconData->data && iconData->data_len > 0) {
+                UIImage *icon = [UIImage imageWithData:[NSData dataWithBytes:iconData->data length:iconData->data_len]];
+                app_service_free_icon_data(iconData);
+                completion(icon);
+                return;
+            } else if (err) idevice_error_free(err);
+        }
+
+        if (self->_springboard) {
+            void *data = NULL;
+            size_t len = 0;
+            struct IdeviceFfiError *err = springboard_services_get_icon(self->_springboard, [bundleId UTF8String], &data, &len);
+            UIImage *icon = nil;
+            if (!err && data && len > 0) {
+                icon = [UIImage imageWithData:[NSData dataWithBytes:data length:len]];
+                idevice_data_free((uint8_t *)data, (uintptr_t)len);
+            } else if (err) idevice_error_free(err);
+            completion(icon);
+            return;
+        }
+        completion(nil);
     });
 }
 
@@ -247,6 +291,7 @@
             struct RsdHandshakeHandle *rsd = NULL;
             struct RemoteServerHandle *remoteServer = NULL;
             struct LocationSimulationHandle *locSim = NULL;
+            struct AppServiceHandle *appService = NULL;
             uint16_t rsdPort = 0;
 
             err = core_device_proxy_connect(self->_provider, &proxy);
@@ -265,6 +310,11 @@
                                 err = remote_server_connect_rsd(adapter, rsd, &remoteServer);
                                 if (!err && remoteServer) {
                                     err = location_simulation_new(remoteServer, &locSim);
+                                    if (!err) {
+                                        // Also try to connect AppService via the same adapter/rsd
+                                        struct RsdHandshakeHandle *rsdClone = rsd_handshake_clone(rsd);
+                                        app_service_connect_rsd(adapter, rsdClone, &appService);
+                                    }
                                 }
                             } else if (stream) {
                                 idevice_stream_free(stream);
@@ -279,6 +329,7 @@
                 self->_rsdHandshake = rsd;
                 self->_remoteServer = remoteServer;
                 self->_locationSimulationNew = locSim;
+                self->_appService = appService;
             } else {
                 if (err) {
                     [self log:[NSString stringWithFormat:@"[LOC] CoreDevice failed: %s (%d). Falling back to lockdown.", err->message, err->code]];
@@ -286,6 +337,7 @@
                     err = NULL;
                 }
                 if (locSim) location_simulation_free(locSim);
+                if (appService) app_service_free(appService);
                 if (remoteServer) remote_server_free(remoteServer);
                 if (rsd) rsd_handshake_free(rsd);
                 if (adapter) adapter_free(adapter);
@@ -352,6 +404,7 @@
     if (self.keepAliveTimer) { [self.keepAliveTimer invalidate]; self.keepAliveTimer = nil; }
     if (_springboard) { springboard_services_free(_springboard); _springboard = NULL; }
     if (_instproxy) { installation_proxy_client_free(_instproxy); _instproxy = NULL; }
+    if (_appService) { app_service_free(_appService); _appService = NULL; }
     if (_locationSimulationNew) { location_simulation_free(_locationSimulationNew); _locationSimulationNew = NULL; }
     if (_remoteServer) { remote_server_free(_remoteServer); _remoteServer = NULL; }
     if (_rsdHandshake) { rsd_handshake_free(_rsdHandshake); _rsdHandshake = NULL; }

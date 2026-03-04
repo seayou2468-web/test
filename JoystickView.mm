@@ -97,7 +97,15 @@
 
     _stick.center = location;
 
-    CGPoint offset = CGPointMake((location.x - center.x) / (radius > 0 ? radius : 1), (location.y - center.y) / (radius > 0 ? radius : 1));
+        CGPoint offset = CGPointMake((location.x - center.x) / (radius > 0 ? radius : 1), (location.y - center.y) / (radius > 0 ? radius : 1));
+    // Apply non-linear scaling for finer control
+    CGFloat deadzone = 0.05;
+    if (fabs(offset.x) < deadzone) offset.x = 0;
+    else offset.x = offset.x * fabs(offset.x);
+
+    if (fabs(offset.y) < deadzone) offset.y = 0;
+    else offset.y = offset.y * fabs(offset.y);
+
     [self.delegate joystickDidMoveWithOffset:offset];
 }
 

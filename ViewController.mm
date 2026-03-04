@@ -143,6 +143,7 @@
     LocationPickerViewController *picker = [[LocationPickerViewController alloc] init];
     picker.delegate = self;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
     [self presentViewController:nav animated:YES completion:nil];
 }
 

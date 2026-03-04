@@ -19,6 +19,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 @property (nonatomic, strong) JoystickView *joystick;
 @property (nonatomic, strong) UIButton *actionButton;
 @property (nonatomic, strong) UIButton *resetButton;
+@property (nonatomic, strong) UIButton *clearSelectionButton;
 @property (nonatomic, strong) UIButton *manualButton;
 @property (nonatomic, strong) UIButton *userLocButton;
 @property (nonatomic, strong) UILabel *statusLabel;
@@ -139,7 +140,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         [self.mapView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.mapView.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.4],
 
-        [self.userLocButton.topAnchor constraintEqualToAnchor:self.mapView.topAnchor constant:10],
+        [self.userLocButton.bottomAnchor constraintEqualToAnchor:self.mapView.bottomAnchor constant:-10],
         [self.userLocButton.trailingAnchor constraintEqualToAnchor:self.mapView.trailingAnchor constant:-10],
         [self.userLocButton.widthAnchor constraintEqualToConstant:40],
         [self.userLocButton.heightAnchor constraintEqualToConstant:40],
@@ -148,6 +149,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         [panel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [panel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [panel.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+
 
         [self.modeControl.topAnchor constraintEqualToAnchor:panel.topAnchor constant:10],
         [self.modeControl.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:20],
@@ -170,12 +172,17 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         [self.actionButton.leadingAnchor constraintEqualToAnchor:self.joystick.trailingAnchor constant:20],
         [self.actionButton.heightAnchor constraintEqualToConstant:40],
 
-        [self.resetButton.centerYAnchor constraintEqualToAnchor:self.joystick.centerYAnchor],
+        [self.clearSelectionButton.centerYAnchor constraintEqualToAnchor:self.joystick.centerYAnchor],
+        [self.clearSelectionButton.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-20],
+        [self.clearSelectionButton.leadingAnchor constraintEqualToAnchor:self.joystick.trailingAnchor constant:20],
+        [self.clearSelectionButton.heightAnchor constraintEqualToConstant:40],
+
+        [self.resetButton.topAnchor constraintEqualToAnchor:self.clearSelectionButton.bottomAnchor constant:10],
         [self.resetButton.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-20],
         [self.resetButton.leadingAnchor constraintEqualToAnchor:self.joystick.trailingAnchor constant:20],
         [self.resetButton.heightAnchor constraintEqualToConstant:40],
 
-        [self.manualButton.bottomAnchor constraintEqualToAnchor:self.joystick.bottomAnchor],
+        [self.manualButton.topAnchor constraintEqualToAnchor:self.resetButton.bottomAnchor constant:10],
         [self.manualButton.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-20],
         [self.manualButton.leadingAnchor constraintEqualToAnchor:self.joystick.trailingAnchor constant:20],
         [self.manualButton.heightAnchor constraintEqualToConstant:40],
@@ -341,7 +348,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 
 - (void)joystickDidMoveWithOffset:(CGPoint)offset {
     [self stopSimulation];
-    double step = (self.speedSlider.value / 111320.0) * 0.1;
+    double step = (self.speedSlider.value / 111320.0) * 0.5;
     CLLocationCoordinate2D newCoord = self.mapView.centerCoordinate;
     newCoord.latitude -= offset.y * step;
     newCoord.longitude += offset.x * step;
@@ -367,15 +374,15 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 - (void)clearWaypoints {
     [self.mapView removeAnnotations:self.waypoints];
     [self.waypoints removeAllObjects];
-    if (self.routeLine) [self.mapView removeOverlay:self.routeLine];
+    [self.mapView removeOverlays:self.mapView.overlays];
     self.routeLine = nil;
+    self.statusLabel.text = @"Waypoints cleared.";
 }
 
 - (void)resetTapped {
     [self stopSimulation];
-    [self clearWaypoints];
     [self.delegate didRequestClearSimulation];
-    self.statusLabel.text = @"Reset to Real Location";
+    self.statusLabel.text = @"Device Simulation Cleared.";
 }
 
 - (void)modeChanged {
