@@ -1,4 +1,10 @@
-#import "DeviceConnectionManager.h"
+import re
+
+with open('DeviceConnectionManager.mm', 'r') as f:
+    content = f.read()
+
+# Completely reset the file with the template I know works
+template = r'''#import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -539,3 +545,7 @@
 }
 
 @end
+'''
+
+with open('DeviceConnectionManager.mm', 'w') as f:
+    f.write(template)
