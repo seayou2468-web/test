@@ -154,7 +154,8 @@ extern "C" {
     });
 }
 
-- (void)performConnect:(NSData *)data withToken:(NSInteger)token {
+// FIX: Renamed method to match call site 'performConnectWithData:withToken:'
+- (void)performConnectWithData:(NSData *)data withToken:(NSInteger)token {
     [self log:[NSString stringWithFormat:@"[CONN] Starting sequence (Token: %ld)", (long)token]];
     [self cleanupInternal];
 
