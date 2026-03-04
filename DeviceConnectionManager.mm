@@ -13,7 +13,7 @@
     struct LocationSimulationServiceHandle *_locationSimulation;
     dispatch_queue_t _connectionQueue;
     NSInteger _activeToken;
-}
+    NSTimeInterval _lastLocationUpdate;}
 @property (nonatomic, strong) NSTimer *heartbeatTimer;
 @property (nonatomic, strong) NSTimer *keepAliveTimer;
 @end
@@ -167,12 +167,12 @@
     dispatch_async(_connectionQueue, ^{
         if (self->_activeToken != token || !self->_lockdown) return;
         NSArray *keys = @[@"DeviceName", @"ProductVersion", @"ProductType", @"UniqueDeviceID", @"SerialNumber", @"CPUArchitecture", @"DeviceClass"];
-        NSMutableString *infoSummary = [NSMutableString stringWithString:@"\n[DEVICE INFO]\n"];
+        NSMutableString *infoSummary = [NSMutableString stringWithString:@"[DEVICE INFO]"];
         for (NSString *key in keys) {
             plist_t val = NULL;
             if (lockdownd_get_value(self->_lockdown, [key UTF8String], NULL, &val) == NULL && val) {
                 id obj = [PlistUtils objectFromPlist:val];
-                if (obj) [infoSummary appendFormat:@"  %-16s: %@\n", [key UTF8String], obj];
+                if (obj) [infoSummary appendFormat:@"  %-16s: %@", [key UTF8String], obj];
                 plist_free(val);
             }
         }
@@ -223,6 +223,11 @@
 }
 
 - (void)simulateLocationWithLatitude:(double)lat longitude:(double)lon {
+    // Basic rate limiting to 10Hz to avoid overwhelming the device/queue
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (now - _lastLocationUpdate < 0.1) return;
+    _lastLocationUpdate = now;
+
     dispatch_async(_connectionQueue, ^{
         if (!self->_provider) return;
         struct IdeviceFfiError *err = NULL;
