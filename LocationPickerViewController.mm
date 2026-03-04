@@ -1,5 +1,6 @@
 #import "LocationPickerViewController.h"
 #import "JoystickView.h"
+#import <CoreLocation/CoreLocation.h>
 
 typedef NS_ENUM(NSInteger, SimulationMode) {
     ModeTeleport,
@@ -8,9 +9,10 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     ModeCustom
 };
 
-@interface LocationPickerViewController () <MKMapViewDelegate, UISearchBarDelegate, JoystickViewDelegate>
+@interface LocationPickerViewController () <MKMapViewDelegate, UISearchBarDelegate, JoystickViewDelegate, CLLocationManagerDelegate>
 
 @property (nonatomic, strong) MKMapView *mapView;
+@property (nonatomic, strong) CLLocationManager *locationManager;
 @property (nonatomic, strong) UISearchBar *searchBar;
 @property (nonatomic, strong) UISegmentedControl *modeControl;
 @property (nonatomic, strong) UISlider *speedSlider;
@@ -18,6 +20,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 @property (nonatomic, strong) UIButton *actionButton;
 @property (nonatomic, strong) UIButton *resetButton;
 @property (nonatomic, strong) UIButton *manualButton;
+@property (nonatomic, strong) UIButton *userLocButton;
 @property (nonatomic, strong) UILabel *statusLabel;
 
 @property (nonatomic, strong) NSMutableArray<MKPointAnnotation *> *waypoints;
@@ -37,6 +40,10 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     self.waypoints = [NSMutableArray array];
 
+    self.locationManager = [[CLLocationManager alloc] init];
+    self.locationManager.delegate = self;
+    [self.locationManager requestWhenInUseAuthorization];
+
     [self setupUI];
 }
 
@@ -49,11 +56,20 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 
     self.mapView = [[MKMapView alloc] init];
     self.mapView.delegate = self;
+    self.mapView.showsUserLocation = YES;
     self.mapView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.mapView];
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleMapTap:)];
     [self.mapView addGestureRecognizer:tap];
+
+    self.userLocButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.userLocButton setImage:[UIImage systemImageNamed:@"location.fill"] forState:UIControlStateNormal];
+    [self.userLocButton setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.8]];
+    self.userLocButton.layer.cornerRadius = 8;
+    [self.userLocButton addTarget:self action:@selector(goToUserLocation) forControlEvents:UIControlEventTouchUpInside];
+    self.userLocButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.userLocButton];
 
     UIView *panel = [[UIView alloc] init];
     panel.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
@@ -109,7 +125,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 
     self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.font = [UIFont fontWithName:@"Menlo" size:10];
-    self.statusLabel.text = @"Tap map or use search to begin";
+    self.statusLabel.text = @"Ready";
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [panel addSubview:self.statusLabel];
 
@@ -122,6 +138,11 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         [self.mapView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.mapView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.mapView.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.4],
+
+        [self.userLocButton.topAnchor constraintEqualToAnchor:self.mapView.topAnchor constant:10],
+        [self.userLocButton.trailingAnchor constraintEqualToAnchor:self.mapView.trailingAnchor constant:-10],
+        [self.userLocButton.widthAnchor constraintEqualToConstant:40],
+        [self.userLocButton.heightAnchor constraintEqualToConstant:40],
 
         [panel.topAnchor constraintEqualToAnchor:self.mapView.bottomAnchor],
         [panel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
@@ -164,6 +185,13 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     ]];
 
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(doneTapped)];
+}
+
+- (void)goToUserLocation {
+    CLLocation *loc = self.mapView.userLocation.location;
+    if (loc) {
+        [self.mapView setCenterCoordinate:loc.coordinate animated:YES];
+    }
 }
 
 #pragma mark - Map Actions
@@ -357,12 +385,25 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 }
 
 - (void)updateStatus {
-    self.statusLabel.text = [NSString stringWithFormat:@"Waypoints: %lu | Lat: %.4f, Lon: %.4f", (unsigned long)self.waypoints.count, self.waypoints.lastObject.coordinate.latitude, self.waypoints.lastObject.coordinate.longitude];
+    if (self.waypoints.count > 0) {
+        self.statusLabel.text = [NSString stringWithFormat:@"Waypoints: %lu | Lat: %.4f, Lon: %.4f", (unsigned long)self.waypoints.count, self.waypoints.lastObject.coordinate.latitude, self.waypoints.lastObject.coordinate.longitude];
+    } else {
+        self.statusLabel.text = @"Ready";
+    }
 }
 
 - (void)doneTapped {
     [self stopSimulation];
     [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+#pragma mark - CLLocationManagerDelegate
+
+- (void)locationManagerDidChangeAuthorization:(CLLocationManager *)manager {
+    if (manager.authorizationStatus == kCLAuthorizationStatusAuthorizedWhenInUse ||
+        manager.authorizationStatus == kCLAuthorizationStatusAuthorizedAlways) {
+        self.mapView.showsUserLocation = YES;
+    }
 }
 
 @end
