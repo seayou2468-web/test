@@ -257,7 +257,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     if (self.waypoints.count < 2) return;
 
     MKDirectionsRequest *request = [[MKDirectionsRequest alloc] init];
-    request.source = [MKMapItem mapItemForCurrentLocation]; // Placeholder, should use first waypoint
+    request.source = [[MKMapItem alloc] initWithPlacemark:[[MKPlacemark alloc] initWithCoordinate:self.waypoints[0].coordinate]];
     request.destination = [[MKMapItem alloc] initWithPlacemark:[[MKPlacemark alloc] initWithCoordinate:self.waypoints.lastObject.coordinate]];
     request.transportType = MKDirectionsTransportTypeAutomobile;
 

@@ -24,67 +24,106 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [self.view setBackgroundColor:[UIColor systemGroupedBackgroundColor]];
-    CGRect viewBounds = [[self view] bounds];
 
     self.connectionManager = [[DeviceConnectionManager alloc] initWithDelegate:self];
     self.iconCache = [[NSCache alloc] init];
 
-    self.segmentedControl = [[UISegmentedControl alloc] initWithItems:@[@"Logs", @"Apps"]];
-    self.segmentedControl.frame = CGRectMake(20, 90, viewBounds.size.width - 40, 30);
-    self.segmentedControl.selectedSegmentIndex = 0;
-    [self.segmentedControl addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
-    [self.view addSubview:self.segmentedControl];
-
-    self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 50, viewBounds.size.width - 40, 30)];
+    self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.text = @"Status: Released";
     self.statusLabel.textAlignment = NSTextAlignmentCenter;
     self.statusLabel.font = [UIFont boldSystemFontOfSize:14];
+    self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.statusLabel];
 
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectMake(20, 130, viewBounds.size.width - 40, 320) style:UITableViewStylePlain];
+    self.segmentedControl = [[UISegmentedControl alloc] initWithItems:@[@"Logs", @"Apps"]];
+    self.segmentedControl.selectedSegmentIndex = 0;
+    [self.segmentedControl addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
+    self.segmentedControl.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.segmentedControl];
+
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     self.tableView.hidden = YES;
     self.tableView.layer.cornerRadius = 8;
     self.tableView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.tableView];
 
-    self.logView = [[UITextView alloc] initWithFrame:CGRectMake(20, 130, viewBounds.size.width - 40, 320)];
-    [self.logView setEditable:NO];
-    [self.logView setBackgroundColor:[UIColor secondarySystemGroupedBackgroundColor]];
-    [self.logView setFont:[UIFont fontWithName:@"Menlo" size:10] ?: [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular]];
-    [[self view] addSubview:self.logView];
+    self.logView = [[UITextView alloc] init];
+    self.logView.setEditable(NO);
+    self.logView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+    self.logView.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
     self.logView.layer.cornerRadius = 8;
     self.logView.clipsToBounds = YES;
+    self.logView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.logView];
 
     self.connectButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.connectButton setTitle:@"Select Pairing File & Connect" forState:UIControlStateNormal];
-    [self.connectButton setFrame:CGRectMake(20, 470, viewBounds.size.width - 40, 50)];
     self.connectButton.backgroundColor = [UIColor systemBlueColor];
     [self.connectButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.connectButton.layer.cornerRadius = 10;
     [self.connectButton addTarget:self action:@selector(selectPairingFile) forControlEvents:UIControlEventTouchUpInside];
-    [[self view] addSubview:self.connectButton];
+    self.connectButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.connectButton];
 
     self.disconnectButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.disconnectButton setTitle:@"Manual Disconnect" forState:UIControlStateNormal];
-    [self.disconnectButton setFrame:CGRectMake(20, 530, viewBounds.size.width/2 - 30, 50)];
+    [self.disconnectButton setTitle:@"Disconnect" forState:UIControlStateNormal];
     self.disconnectButton.backgroundColor = [UIColor systemRedColor];
     [self.disconnectButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.disconnectButton.layer.cornerRadius = 10;
     [self.disconnectButton addTarget:self action:@selector(cleanupConnection) forControlEvents:UIControlEventTouchUpInside];
-    [self.disconnectButton setEnabled:NO];
-    [[self view] addSubview:self.disconnectButton];
+    self.disconnectButton.setEnabled(NO);
+    self.disconnectButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.disconnectButton];
 
     self.locationButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.locationButton setTitle:@"Simulate Location" forState:UIControlStateNormal];
-    [self.locationButton setFrame:CGRectMake(viewBounds.size.width/2 + 10, 530, viewBounds.size.width/2 - 30, 50)];
+    [self.locationButton setTitle:@"Simulate" forState:UIControlStateNormal];
     self.locationButton.backgroundColor = [UIColor systemGreenColor];
     [self.locationButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.locationButton.layer.cornerRadius = 10;
     [self.locationButton addTarget:self action:@selector(showLocationPicker) forControlEvents:UIControlEventTouchUpInside];
-    [self.locationButton setEnabled:NO];
-    [[self view] addSubview:self.locationButton];
+    self.locationButton.setEnabled(NO);
+    self.locationButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.locationButton];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [self.statusLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
+        [self.statusLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.statusLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.statusLabel.heightAnchor constraintEqualToConstant:30],
+
+        [self.segmentedControl.topAnchor constraintEqualToAnchor:self.statusLabel.bottomAnchor constant:10],
+        [self.segmentedControl.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.segmentedControl.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.segmentedControl.heightAnchor constraintEqualToConstant:30],
+
+        [self.tableView.topAnchor constraintEqualToAnchor:self.segmentedControl.bottomAnchor constant:10],
+        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:self.connectButton.topAnchor constant:-10],
+
+        [self.logView.topAnchor constraintEqualToAnchor:self.segmentedControl.bottomAnchor constant:10],
+        [self.logView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.logView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.logView.bottomAnchor constraintEqualToAnchor:self.connectButton.topAnchor constant:-10],
+
+        [self.connectButton.bottomAnchor constraintEqualToAnchor:self.disconnectButton.topAnchor constant:-10],
+        [self.connectButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.connectButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.connectButton.heightAnchor constraintEqualToConstant:50],
+
+        [self.disconnectButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
+        [self.disconnectButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.disconnectButton.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.5 constant:-25],
+        [self.disconnectButton.heightAnchor constraintEqualToConstant:50],
+
+        [self.locationButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
+        [self.locationButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.locationButton.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.5 constant:-25],
+        [self.locationButton.heightAnchor constraintEqualToConstant:50],
+    ]];
 
     [self managerDidLog:@"[INIT] Ready. Select a pairing file to connect."];
 }
@@ -100,6 +139,7 @@
 }
 
 - (void)showLocationPicker {
+    [self managerDidLog:@"[UI] Showing Location Picker..."];
     LocationPickerViewController *picker = [[LocationPickerViewController alloc] init];
     picker.delegate = self;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
@@ -270,13 +310,21 @@
     detailVC.title = @"App Details";
     detailVC.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
 
-    UITableView *tv = [[UITableView alloc] initWithFrame:detailVC.view.bounds style:UITableViewStyleInsetGrouped];
+    UITableView *tv = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     tv.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     tv.delegate = self;
     tv.dataSource = self;
     tv.rowHeight = UITableViewAutomaticDimension;
     tv.estimatedRowHeight = 44;
+    tv.translatesAutoresizingMaskIntoConstraints = NO;
     [detailVC.view addSubview:tv];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [tv.topAnchor constraintEqualToAnchor:detailVC.view.topAnchor],
+        [tv.leadingAnchor constraintEqualToAnchor:detailVC.view.leadingAnchor],
+        [tv.trailingAnchor constraintEqualToAnchor:detailVC.view.trailingAnchor],
+        [tv.bottomAnchor constraintEqualToAnchor:detailVC.view.bottomAnchor],
+    ]];
 
     UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 160)];
     UIImageView *iconView = [[UIImageView alloc] init];
