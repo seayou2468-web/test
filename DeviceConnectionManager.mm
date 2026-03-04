@@ -10,6 +10,7 @@
     struct HeartbeatClientHandle *_heartbeat;
     struct SpringBoardServicesClientHandle *_springboard;
     struct InstallationProxyClientHandle *_instproxy;
+    struct LocationSimulationServiceHandle *_locationSimulation;
     dispatch_queue_t _connectionQueue;
     NSInteger _activeToken;
 }
@@ -221,12 +222,51 @@
     });
 }
 
+- (void)simulateLocationWithLatitude:(double)lat longitude:(double)lon {
+    dispatch_async(_connectionQueue, ^{
+        if (!self->_provider) return;
+        struct IdeviceFfiError *err = NULL;
+        if (!self->_locationSimulation) {
+            err = lockdown_location_simulation_connect(self->_provider, &self->_locationSimulation);
+            if (err) {
+                [self log:[NSString stringWithFormat:@"[LOC] Connect failed: %s (%d)", err->message, err->code]];
+                idevice_error_free(err);
+                return;
+            }
+        }
+
+        NSString *latStr = [NSString stringWithFormat:@"%.6f", lat];
+        NSString *lonStr = [NSString stringWithFormat:@"%.6f", lon];
+        err = lockdown_location_simulation_set(self->_locationSimulation, [latStr UTF8String], [lonStr UTF8String]);
+        if (err) {
+            [self log:[NSString stringWithFormat:@"[LOC] Set failed: %s (%d)", err->message, err->code]];
+            idevice_error_free(err);
+        } else {
+            [self log:[NSString stringWithFormat:@"[LOC] Simulated to %@, %@", latStr, lonStr]];
+        }
+    });
+}
+
+- (void)clearSimulatedLocation {
+    dispatch_async(_connectionQueue, ^{
+        if (!self->_locationSimulation) return;
+        struct IdeviceFfiError *err = lockdown_location_simulation_clear(self->_locationSimulation);
+        if (err) {
+            [self log:[NSString stringWithFormat:@"[LOC] Clear failed: %s (%d)", err->message, err->code]];
+            idevice_error_free(err);
+        } else {
+            [self log:@"[LOC] Simulation cleared."];
+        }
+    });
+}
+
 - (void)cleanupInternal {
     dispatch_async(dispatch_get_main_queue(), ^{ [[UIApplication sharedApplication] setIdleTimerDisabled:NO]; });
     if (self.heartbeatTimer) { [self.heartbeatTimer invalidate]; self.heartbeatTimer = nil; }
     if (self.keepAliveTimer) { [self.keepAliveTimer invalidate]; self.keepAliveTimer = nil; }
     if (_springboard) { springboard_services_free(_springboard); _springboard = NULL; }
     if (_instproxy) { installation_proxy_client_free(_instproxy); _instproxy = NULL; }
+    if (_locationSimulation) { lockdown_location_simulation_free(_locationSimulation); _locationSimulation = NULL; }
     if (_heartbeat) { heartbeat_client_free(_heartbeat); _heartbeat = NULL; }
     if (_lockdown) { lockdownd_client_free(_lockdown); _lockdown = NULL; }
     if (_provider) { idevice_provider_free(_provider); _provider = NULL; }

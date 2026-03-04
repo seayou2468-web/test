@@ -19,5 +19,7 @@
 - (void)disconnect;
 - (void)fetchAppList;
 - (void)fetchIconForBundleId:(NSString *)bundleId completion:(void (^)(UIImage *))completion;
+- (void)simulateLocationWithLatitude:(double)lat longitude:(double)lon;
+- (void)clearSimulatedLocation;
 
 @end

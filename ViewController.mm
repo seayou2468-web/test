@@ -2,13 +2,15 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
+#import "LocationPickerViewController.h"
 
-@interface ViewController () <DeviceConnectionManagerDelegate, UIDocumentPickerDelegate, UITableViewDelegate, UITableViewDataSource>
+@interface ViewController () <DeviceConnectionManagerDelegate, UIDocumentPickerDelegate, UITableViewDelegate, UITableViewDataSource, LocationPickerDelegate>
 @property (nonatomic, strong) DeviceConnectionManager *connectionManager;
 @property (nonatomic, strong) UITextView *logView;
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UIButton *connectButton;
 @property (nonatomic, strong) UIButton *disconnectButton;
+@property (nonatomic, strong) UIButton *locationButton;
 @property (nonatomic, strong) NSCache<NSString *, UIImage *> *iconCache;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray<NSDictionary *> *appList;
@@ -66,7 +68,7 @@
 
     self.disconnectButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.disconnectButton setTitle:@"Manual Disconnect" forState:UIControlStateNormal];
-    [self.disconnectButton setFrame:CGRectMake(20, 530, viewBounds.size.width - 40, 50)];
+    [self.disconnectButton setFrame:CGRectMake(20, 530, viewBounds.size.width/2 - 30, 50)];
     self.disconnectButton.backgroundColor = [UIColor systemRedColor];
     [self.disconnectButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.disconnectButton.layer.cornerRadius = 10;
@@ -74,7 +76,17 @@
     [self.disconnectButton setEnabled:NO];
     [[self view] addSubview:self.disconnectButton];
 
-    [self managerDidLog:@"[INIT] Ready. Select a pairing file to connect to 10.7.0.1:62078."];
+    self.locationButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.locationButton setTitle:@"Simulate Location" forState:UIControlStateNormal];
+    [self.locationButton setFrame:CGRectMake(viewBounds.size.width/2 + 10, 530, viewBounds.size.width/2 - 30, 50)];
+    self.locationButton.backgroundColor = [UIColor systemGreenColor];
+    [self.locationButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.locationButton.layer.cornerRadius = 10;
+    [self.locationButton addTarget:self action:@selector(showLocationPicker) forControlEvents:UIControlEventTouchUpInside];
+    [self.locationButton setEnabled:NO];
+    [[self view] addSubview:self.locationButton];
+
+    [self managerDidLog:@"[INIT] Ready. Select a pairing file to connect."];
 }
 
 - (void)selectPairingFile {
@@ -85,6 +97,13 @@
 
 - (void)cleanupConnection {
     [self.connectionManager disconnect];
+}
+
+- (void)showLocationPicker {
+    LocationPickerViewController *picker = [[LocationPickerViewController alloc] init];
+    picker.delegate = self;
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 #pragma mark - UIDocumentPickerDelegate
@@ -106,6 +125,7 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.connectButton setEnabled:NO];
             [self.disconnectButton setEnabled:YES];
+            [self.locationButton setEnabled:YES];
             [self.connectionManager connectWithData:data];
         });
     });
@@ -130,6 +150,7 @@
         if ([status isEqualToString:@"Released"]) {
             [self.connectButton setEnabled:YES];
             [self.disconnectButton setEnabled:NO];
+            [self.locationButton setEnabled:NO];
         }
     });
 }
@@ -138,8 +159,17 @@
     if (self.connectionManager.activeToken == token) {
         self.appList = appList;
         [self.tableView reloadData];
-        [self managerDidLog:[NSString stringWithFormat:@"[APPS] Loaded %lu apps.", (unsigned long)appList.count]];
     }
+}
+
+#pragma mark - LocationPickerDelegate
+
+- (void)didSelectLocation:(CLLocationCoordinate2D)coordinate {
+    [self.connectionManager simulateLocationWithLatitude:coordinate.latitude longitude:coordinate.longitude];
+}
+
+- (void)didRequestClearSimulation {
+    [self.connectionManager clearSimulatedLocation];
 }
 
 #pragma mark - UI Actions
