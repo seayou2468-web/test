@@ -66,7 +66,7 @@ extern "C" {
     [self.disconnectButton setEnabled:NO];
     [[self view] addSubview:self.disconnectButton];
 
-    [self log:@"App Initialized. Target 10.7.0.1:62078"];
+    [self log:@"App Initialized (Memory-Buffer Mode)."];
 }
 
 - (void)updateStatus:(NSString *)status color:(UIColor *)color {
@@ -99,34 +99,17 @@ extern "C" {
 
 - (void)cleanupInternal {
     [[UIApplication sharedApplication] setIdleTimerDisabled:NO];
+    if (self.heartbeatTimer) [self.heartbeatTimer invalidate];
+    self.heartbeatTimer = nil;
+    if (self.keepAliveTimer) [self.keepAliveTimer invalidate];
+    self.keepAliveTimer = nil;
 
-    if (self.heartbeatTimer) {
-        [self.heartbeatTimer invalidate];
-        self.heartbeatTimer = nil;
-    }
-    if (self.keepAliveTimer) {
-        [self.keepAliveTimer invalidate];
-        self.keepAliveTimer = nil;
-    }
-    if (_heartbeat) {
-        heartbeat_client_free(_heartbeat);
-        _heartbeat = NULL;
-    }
-    if (_lockdown) {
-        lockdownd_client_free(_lockdown);
-        _lockdown = NULL;
-    }
-    if (_provider) {
-        idevice_provider_free(_provider);
-        _provider = NULL;
-    }
-    if (_pairingFile) {
-        idevice_pairing_file_free(_pairingFile);
-        _pairingFile = NULL;
-    }
+    if (_heartbeat) { heartbeat_client_free(_heartbeat); _heartbeat = NULL; }
+    if (_lockdown) { lockdownd_client_free(_lockdown); _lockdown = NULL; }
+    if (_provider) { idevice_provider_free(_provider); _provider = NULL; }
+    if (_pairingFile) { idevice_pairing_file_free(_pairingFile); _pairingFile = NULL; }
 
     [self updateStatus:@"Disconnected" color:[UIColor blackColor]];
-
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.connectButton setEnabled:YES];
         [self.disconnectButton setEnabled:NO];
@@ -137,7 +120,6 @@ extern "C" {
     dispatch_async(_connectionQueue, ^{
         self->_activeToken++;
         [self cleanupInternal];
-        [self log:@"Released all handles."];
     });
 }
 
@@ -147,16 +129,20 @@ extern "C" {
     NSURL *url = [urls firstObject];
     if (!url) return;
 
-    NSString *docDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *destPath = [docDir stringByAppendingPathComponent:@"active_pairing.plist"];
+    [self log:@"Document picked. Reading into memory..."];
+    BOOL canAccess = [url startAccessingSecurityScopedResource];
+    NSError *error = nil;
+    NSData *data = [NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:&error];
+    if (canAccess) [url stopAccessingSecurityScopedResource];
 
-    [[NSFileManager defaultManager] removeItemAtPath:destPath error:nil];
-    if (![[NSFileManager defaultManager] copyItemAtPath:[url path] toPath:destPath error:nil]) {
-        [self log:@"FAILED to prepare pairing file."];
+    if (!data) {
+        [self log:[NSString stringWithFormat:@"FAILED to read file: %@", error.localizedDescription]];
         return;
     }
 
+    [self log:[NSString stringWithFormat:@"File read successfully (%lu bytes).", (unsigned long)data.length]];
     [self updateStatus:@"Connecting..." color:[UIColor orangeColor]];
+
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.connectButton setEnabled:NO];
         [self.disconnectButton setEnabled:YES];
@@ -164,20 +150,19 @@ extern "C" {
 
     dispatch_async(_connectionQueue, ^{
         self->_activeToken++;
-        [self performConnect:destPath withToken:self->_activeToken];
+        [self performConnectWithData:data withToken:self->_activeToken];
     });
 }
 
-- (void)performConnect:(NSString *)filePath withToken:(NSInteger)token {
+- (void)performConnectWithData:(NSData *)data withToken:(NSInteger)token {
     [self cleanupInternal];
-
     auto checkToken = ^BOOL() { return (self->_activeToken == token); };
 
     if (!checkToken()) return;
-    [self log:@"STEP 1: Reading pairing file..."];
-    struct IdeviceFfiError *err = idevice_pairing_file_read([filePath fileSystemRepresentation], &_pairingFile);
+    [self log:@"STEP 1: Parsing pairing data from memory..."];
+    struct IdeviceFfiError *err = idevice_pairing_file_from_bytes((const uint8_t *)data.bytes, (uintptr_t)data.length, &_pairingFile);
     if (err || !_pairingFile) {
-        [self log:@"FAILED to read pairing file."];
+        [self log:@"FAILED to parse pairing data."];
         if (err) idevice_error_free(err);
         [self cleanupInternal];
         return;
@@ -185,7 +170,7 @@ extern "C" {
     if (err) idevice_error_free(err);
 
     if (!checkToken()) return;
-    [self log:@"STEP 2: Creating TCP provider (with pairing file)..."];
+    [self log:@"STEP 2: Creating Provider for 10.7.0.1:62078 (with Pairing)..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
@@ -193,7 +178,6 @@ extern "C" {
     addr.sin_port = htons(62078);
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
-    // RESTORED: Passing _pairingFile to provider creation
     err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, _pairingFile, "test-app", &_provider);
     if (err || !_provider) {
         [self log:@"FAILED to create provider."];
@@ -204,7 +188,7 @@ extern "C" {
     if (err) idevice_error_free(err);
 
     if (!checkToken()) return;
-    [self log:@"STEP 3: Connecting to lockdownd..."];
+    [self log:@"STEP 3: Connecting Lockdownd..."];
     err = lockdownd_connect(_provider, &_lockdown);
     if (err || !_lockdown) {
         [self log:@"FAILED to connect lockdownd."];
@@ -226,7 +210,7 @@ extern "C" {
     if (err) idevice_error_free(err);
 
     if (!checkToken()) return;
-    [self log:@"STEP 5: Establishing Heartbeat..."];
+    [self log:@"STEP 5: Connecting Heartbeat..."];
     err = heartbeat_connect(_provider, &_heartbeat);
     if (err || !_heartbeat) {
         [self log:@"Heartbeat connection failed."];
@@ -242,7 +226,7 @@ extern "C" {
     }
 
     if (!checkToken()) return;
-    [self log:@"STEP 6: Enabling Persistence..."];
+    [self log:@"STEP 6: Starting Persistence..."];
     dispatch_async(dispatch_get_main_queue(), ^{
         if (checkToken()) {
             self.keepAliveTimer = [NSTimer scheduledTimerWithTimeInterval:30.0 target:self selector:@selector(onKeepAliveTimer) userInfo:@(token) repeats:YES];
@@ -250,8 +234,8 @@ extern "C" {
         }
     });
 
-    [self updateStatus:@"Connected & Persistent" color:[UIColor systemGreenColor]];
-    [self log:@"Persistent encrypted session established."];
+    [self updateStatus:@"Connected" color:[UIColor systemGreenColor]];
+    [self log:@"Session established."];
 }
 
 - (void)onHeartbeatTimer {
@@ -264,10 +248,7 @@ extern "C" {
             err = heartbeat_get_marco(self->_heartbeat, 1000, &interval);
             if (!err) [self log:[NSString stringWithFormat:@"Heartbeat OK (%llu)", interval]];
         }
-        if (err) {
-            [self log:@"Heartbeat lost."];
-            idevice_error_free(err);
-        }
+        if (err) { [self log:@"Heartbeat LOST."]; idevice_error_free(err); }
     });
 }
 
@@ -280,13 +261,10 @@ extern "C" {
         if (!err && val) {
             char *name = NULL;
             plist_get_string_val(val, &name);
-            if (name) {
-                [self log:[NSString stringWithFormat:@"Session verified (Name: %s)", name]];
-                plist_mem_free(name);
-            }
+            if (name) { [self log:[NSString stringWithFormat:@"Session OK: %s", name]]; plist_mem_free(name); }
             plist_free(val);
         } else {
-            [self log:@"Session validation FAILED."];
+            [self log:@"Session LOST."];
             if (err) idevice_error_free(err);
             [self cleanupInternal];
         }
