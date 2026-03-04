@@ -98,7 +98,6 @@ extern "C" {
 }
 
 - (void)cleanupInternal {
-    [self log:@"Cleaning up connection state..."];
     [[UIApplication sharedApplication] setIdleTimerDisabled:NO];
 
     if (self.heartbeatTimer) {
@@ -138,6 +137,7 @@ extern "C" {
     dispatch_async(_connectionQueue, ^{
         self->_activeToken++;
         [self cleanupInternal];
+        [self log:@"Released all handles."];
     });
 }
 
@@ -152,7 +152,7 @@ extern "C" {
 
     [[NSFileManager defaultManager] removeItemAtPath:destPath error:nil];
     if (![[NSFileManager defaultManager] copyItemAtPath:[url path] toPath:destPath error:nil]) {
-        [self log:@"FAILED to copy pairing file."];
+        [self log:@"FAILED to prepare pairing file."];
         return;
     }
 
@@ -185,7 +185,7 @@ extern "C" {
     if (err) idevice_error_free(err);
 
     if (!checkToken()) return;
-    [self log:@"STEP 2: Creating provider (10.7.0.1:62078)..."];
+    [self log:@"STEP 2: Creating TCP provider (with pairing file)..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
@@ -193,7 +193,8 @@ extern "C" {
     addr.sin_port = htons(62078);
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
-    err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, NULL, "test-app", &_provider);
+    // RESTORED: Passing _pairingFile to provider creation
+    err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, _pairingFile, "test-app", &_provider);
     if (err || !_provider) {
         [self log:@"FAILED to create provider."];
         if (err) idevice_error_free(err);
@@ -203,7 +204,7 @@ extern "C" {
     if (err) idevice_error_free(err);
 
     if (!checkToken()) return;
-    [self log:@"STEP 3: Connecting lockdownd..."];
+    [self log:@"STEP 3: Connecting to lockdownd..."];
     err = lockdownd_connect(_provider, &_lockdown);
     if (err || !_lockdown) {
         [self log:@"FAILED to connect lockdownd."];
@@ -241,7 +242,7 @@ extern "C" {
     }
 
     if (!checkToken()) return;
-    [self log:@"STEP 6: Starting Keep-Alive queries..."];
+    [self log:@"STEP 6: Enabling Persistence..."];
     dispatch_async(dispatch_get_main_queue(), ^{
         if (checkToken()) {
             self.keepAliveTimer = [NSTimer scheduledTimerWithTimeInterval:30.0 target:self selector:@selector(onKeepAliveTimer) userInfo:@(token) repeats:YES];
@@ -250,7 +251,7 @@ extern "C" {
     });
 
     [self updateStatus:@"Connected & Persistent" color:[UIColor systemGreenColor]];
-    [self log:@"Connection established and persistence enabled."];
+    [self log:@"Persistent encrypted session established."];
 }
 
 - (void)onHeartbeatTimer {
@@ -264,7 +265,7 @@ extern "C" {
             if (!err) [self log:[NSString stringWithFormat:@"Heartbeat OK (%llu)", interval]];
         }
         if (err) {
-            [self log:@"Heartbeat FAILED."];
+            [self log:@"Heartbeat lost."];
             idevice_error_free(err);
         }
     });
@@ -274,19 +275,18 @@ extern "C" {
     NSInteger token = [[self.keepAliveTimer userInfo] integerValue];
     dispatch_async(_connectionQueue, ^{
         if (self->_activeToken != token || !self->_lockdown) return;
-        [self log:@"Keep-Alive: querying DeviceName..."];
         plist_t val = NULL;
         struct IdeviceFfiError *err = lockdownd_get_value(self->_lockdown, "DeviceName", NULL, &val);
         if (!err && val) {
             char *name = NULL;
             plist_get_string_val(val, &name);
             if (name) {
-                [self log:[NSString stringWithFormat:@"Keep-Alive OK: %s", name]];
+                [self log:[NSString stringWithFormat:@"Session verified (Name: %s)", name]];
                 plist_mem_free(name);
             }
             plist_free(val);
         } else {
-            [self log:@"Keep-Alive FAILED. Session might be lost."];
+            [self log:@"Session validation FAILED."];
             if (err) idevice_error_free(err);
             [self cleanupInternal];
         }
