@@ -35,26 +35,7 @@ extern "C" {
 @property (nonatomic, strong) NSDictionary *selectedAppDetails;
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *detailSections;
 
-- (NSString *)formattedValueForObject:(id)obj {
-    if ([obj isKindOfClass:[NSDictionary class]]) {
-        NSMutableString *s = [NSMutableString stringWithString:@"{\n"];
-        NSDictionary *dict = (NSDictionary *)obj;
-        [dict enumerateKeysAndObjectsUsingBlock:^(id key, id val, BOOL *stop) {
-            [s appendFormat:@"  %@: %@\n", key, [self formattedValueForObject:val]];
-        }];
-        [s appendString:@"}"];
-        return s;
-    } else if ([obj isKindOfClass:[NSArray class]]) {
-        NSMutableString *s = [NSMutableString stringWithString:@"[\n"];
-        for (id item in (NSArray *)obj) {
-            [s appendFormat:@"  %@,\n", [self formattedValueForObject:item]];
-        }
-        [s appendString:@"]"];
-        return s;
-    }
-    return [NSString stringWithFormat:@"%@", obj];
-}
-
+- (NSString *)formattedValueForObject:(id)obj;
 @end
 
 @implementation ViewController
