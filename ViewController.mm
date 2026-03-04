@@ -57,7 +57,7 @@ extern "C" {
     [self log:@"Initializing idevice logger..."];
     idevice_init_logger(Debug, Debug, NULL);
 
-    [self log:@"App Initialized. Sequence: Provider -> Lockdownd -> StartSession/TLS -> Heartbeat."];
+    [self log:@"App Initialized. Target: 10.7.0.1 Port: 62078"];
 }
 
 - (void)log:(NSString *)message {
@@ -142,12 +142,12 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 2: Creating TCP provider for 10.7.0.1..."];
+    [self log:@"STEP 2: Creating TCP provider for 10.7.0.1:62078..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(LOCKDOWN_PORT);
+    addr.sin_port = htons(62078); // Explicitly using 62078 as requested
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
     err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, _pairingFile, "test-app", &_provider);
@@ -158,7 +158,7 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 3: Connecting to lockdownd (Unencrypted phase)..."];
+    [self log:@"STEP 3: Connecting to lockdownd..."];
     err = lockdownd_connect(_provider, &_lockdown);
     if (err || !_lockdown) {
         [self log:[NSString stringWithFormat:@"FAILED to connect to lockdownd: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
@@ -167,7 +167,7 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 4: Sending StartSession request (Initiating TLS Handshake)..."];
+    [self log:@"STEP 4: lockdownd_start_session (Initiating TLS)..."];
     err = lockdownd_start_session(_lockdown, _pairingFile);
     if (err) {
         [self log:[NSString stringWithFormat:@"FAILED to start session: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
@@ -184,14 +184,14 @@ extern "C" {
         [self log:[NSString stringWithFormat:@"FAILED to connect to Heartbeat: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
     } else {
-        [self log:@"SUCCESS: Heartbeat connected. Starting timer (every 10s)..."];
+        [self log:@"SUCCESS: Heartbeat connected. Starting timer..."];
         dispatch_async(dispatch_get_main_queue(), ^{
             self.heartbeatTimer = [NSTimer scheduledTimerWithTimeInterval:10.0 target:self selector:@selector(onHeartbeatTimer) userInfo:nil repeats:YES];
             [self.disconnectButton setEnabled:YES];
         });
     }
 
-    [self log:@"Connection sequence complete. Maintaining session."];
+    [self log:@"Connection logic finished."];
 }
 
 - (void)onHeartbeatTimer {
