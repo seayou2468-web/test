@@ -31,7 +31,7 @@ extern "C" {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    [self.view setBackgroundColor:[UIColor whiteColor]];
+    [self.view setBackgroundColor:[UIColor systemGroupedBackgroundColor]];
     CGRect viewBounds = [[self view] bounds];
 
     _pairingFile = NULL;
@@ -49,19 +49,27 @@ extern "C" {
 
     self.logView = [[UITextView alloc] initWithFrame:CGRectMake(20, 100, viewBounds.size.width - 40, 350)];
     [self.logView setEditable:NO];
-    [self.logView setBackgroundColor:[UIColor colorWithWhite:0.95 alpha:1.0]];
-    [self.logView setFont:[UIFont systemFontOfSize:10]];
+    [self.logView setBackgroundColor:[UIColor secondarySystemGroupedBackgroundColor]];
+    [self.logView setFont:[UIFont fontWithName:@"Menlo" size:10] ?: [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular]];
     [[self view] addSubview:self.logView];
+    self.logView.layer.cornerRadius = 8;
+    self.logView.clipsToBounds = YES;
 
     self.connectButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.connectButton setTitle:@"Select Pairing File & Connect" forState:UIControlStateNormal];
     [self.connectButton setFrame:CGRectMake(20, 470, viewBounds.size.width - 40, 50)];
+    self.connectButton.backgroundColor = [UIColor systemBlueColor];
+    [self.connectButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.connectButton.layer.cornerRadius = 10;
     [self.connectButton addTarget:self action:@selector(selectPairingFile) forControlEvents:UIControlEventTouchUpInside];
     [[self view] addSubview:self.connectButton];
 
     self.disconnectButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.disconnectButton setTitle:@"Manual Disconnect" forState:UIControlStateNormal];
     [self.disconnectButton setFrame:CGRectMake(20, 530, viewBounds.size.width - 40, 50)];
+    self.disconnectButton.backgroundColor = [UIColor systemRedColor];
+    [self.disconnectButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.disconnectButton.layer.cornerRadius = 10;
     [self.disconnectButton addTarget:self action:@selector(cleanupConnection) forControlEvents:UIControlEventTouchUpInside];
     [self.disconnectButton setEnabled:NO];
     [[self view] addSubview:self.disconnectButton];
@@ -312,7 +320,7 @@ extern "C" {
         [self log:@"[INFO] Fetching detailed device information..."];
 
         NSArray *keys = @[@"DeviceName", @"ProductVersion", @"ProductType", @"UniqueDeviceID", @"SerialNumber", @"CPUArchitecture", @"DeviceClass"];
-        NSMutableString *infoSummary = [NSMutableString stringWithString:@"\n--- DEVICE INFO ---\n"];
+        NSMutableString *infoSummary = [NSMutableString stringWithString:@"\n[DEVICE INFO]\n"];
 
         for (NSString *key in keys) {
             plist_t val = NULL;
@@ -321,16 +329,16 @@ extern "C" {
                 char *cStr = NULL;
                 plist_get_string_val(val, &cStr);
                 if (cStr) {
-                    [infoSummary appendFormat:@"%@: %s\n", key, cStr];
+                    [infoSummary appendFormat:@"  %-16s: %s\n", [key UTF8String], cStr];
                     plist_mem_free(cStr);
                 }
                 plist_free(val);
             } else {
                 if (err) idevice_error_free(err);
-                [infoSummary appendFormat:@"%@: [ERROR]\n", key];
+                [infoSummary appendFormat:@"  %-16s: [ERROR]\n", [key UTF8String]];
             }
         }
-        [infoSummary appendString:@"------------------"];
+        [infoSummary appendString:@"----------------"];
         [self log:infoSummary];
     });
 }
