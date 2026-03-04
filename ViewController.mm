@@ -11,9 +11,14 @@ extern "C" {
 }
 #endif
 
-@interface ViewController ()
+@interface ViewController () {
+    struct IdevicePairingFile *_pairingFile;
+    struct IdeviceProviderHandle *_provider;
+    struct LockdowndClientHandle *_lockdown;
+}
 @property (nonatomic, strong) UITextView *logView;
 @property (nonatomic, strong) UIButton *connectButton;
+@property (nonatomic, strong) UIButton *disconnectButton;
 @end
 
 @implementation ViewController
@@ -23,7 +28,11 @@ extern "C" {
     [self.view setBackgroundColor:[UIColor whiteColor]];
     CGRect viewBounds = [[self view] bounds];
 
-    self.logView = [[UITextView alloc] initWithFrame:CGRectMake(20, 100, viewBounds.size.width - 40, 400)];
+    _pairingFile = NULL;
+    _provider = NULL;
+    _lockdown = NULL;
+
+    self.logView = [[UITextView alloc] initWithFrame:CGRectMake(20, 100, viewBounds.size.width - 40, 350)];
     [self.logView setEditable:NO];
     [self.logView setBackgroundColor:[UIColor colorWithWhite:0.95 alpha:1.0]];
     [self.logView setFont:[UIFont systemFontOfSize:12]];
@@ -31,21 +40,31 @@ extern "C" {
 
     self.connectButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.connectButton setTitle:@"Select Pairing File & Connect" forState:UIControlStateNormal];
-    [self.connectButton setFrame:CGRectMake(20, 520, viewBounds.size.width - 40, 50)];
+    [self.connectButton setFrame:CGRectMake(20, 470, viewBounds.size.width - 40, 50)];
     [self.connectButton addTarget:self action:@selector(selectPairingFile) forControlEvents:UIControlEventTouchUpInside];
     [[self view] addSubview:self.connectButton];
 
-    [self log:@"App Initialized (Minimal Mode)"];
+    self.disconnectButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.disconnectButton setTitle:@"Disconnect & Cleanup" forState:UIControlStateNormal];
+    [self.disconnectButton setFrame:CGRectMake(20, 530, viewBounds.size.width - 40, 50)];
+    [self.disconnectButton addTarget:self action:@selector(cleanupConnection) forControlEvents:UIControlEventTouchUpInside];
+    [self.disconnectButton setEnabled:NO];
+    [[self view] addSubview:self.disconnectButton];
+
+    [self log:@"Initializing idevice logger..."];
+    idevice_init_logger(Debug, Debug, NULL);
+
+    [self log:@"App Initialized. Waiting for input."];
 }
 
 - (void)log:(NSString *)message {
     if (!message) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         NSString *currentText = [self.logView text] ?: @"";
-        NSString *newText = [currentText stringByAppendingFormat:@"%@\n", message];
+        NSString *newText = [currentText stringByAppendingFormat:@"[%@] %@\n", [NSDate date], message];
         [self.logView setText:newText];
         [self.logView scrollRangeToVisible:NSMakeRange([newText length], 0)];
-        NSLog(@"[LOG] %@", message);
+        NSLog(@"[APP_LOG] %@", message);
     });
 }
 
@@ -53,6 +72,27 @@ extern "C" {
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:[NSArray arrayWithObject:UTTypeItem] asCopy:YES];
     [picker setDelegate:self];
     [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)cleanupConnection {
+    [self log:@"Manual Cleanup Triggered."];
+    if (_lockdown) {
+        lockdownd_client_free(_lockdown);
+        _lockdown = NULL;
+    }
+    if (_provider) {
+        idevice_provider_free(_provider);
+        _provider = NULL;
+    }
+    if (_pairingFile) {
+        idevice_pairing_file_free(_pairingFile);
+        _pairingFile = NULL;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.connectButton setEnabled:YES];
+        [self.disconnectButton setEnabled:NO];
+    });
+    [self log:@"Cleanup complete."];
 }
 
 #pragma mark - UIDocumentPickerDelegate
@@ -64,6 +104,10 @@ extern "C" {
         [self log:[NSString stringWithFormat:@"File picked: %@", path]];
         BOOL canAccess = [url startAccessingSecurityScopedResource];
 
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.connectButton setEnabled:NO];
+        });
+
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             [self performConnect:path];
             if (canAccess) {
@@ -74,18 +118,20 @@ extern "C" {
 }
 
 - (void)performConnect:(NSString *)filePath {
-    struct IdevicePairingFile *pairingFile = NULL;
     struct IdeviceFfiError *err = NULL;
 
-    [self log:@"STEP 1: idevice_pairing_file_read..."];
-    err = idevice_pairing_file_read([filePath UTF8String], &pairingFile);
-    if (err) {
-        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
+    [self cleanupConnection];
+
+    [self log:@"STEP 1: Reading pairing file..."];
+    err = idevice_pairing_file_read([filePath UTF8String], &_pairingFile);
+    if (err || !_pairingFile) {
+        [self log:[NSString stringWithFormat:@"FAILED to read pairing file: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
+        [self cleanupConnection];
         return;
     }
 
-    [self log:@"STEP 2: idevice_tcp_provider_new..."];
+    [self log:@"STEP 2: Creating TCP provider for 10.7.0.1..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
@@ -93,54 +139,54 @@ extern "C" {
     addr.sin_port = htons(LOCKDOWN_PORT);
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
-    struct IdeviceProviderHandle *provider = NULL;
-    err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, pairingFile, "test-app", &provider);
-    if (err) {
-        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
+    err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, _pairingFile, "test-app", &_provider);
+    if (err || !_provider) {
+        [self log:[NSString stringWithFormat:@"FAILED to create provider: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
-        if (pairingFile) idevice_pairing_file_free(pairingFile);
+        [self cleanupConnection];
         return;
     }
 
-    [self log:@"STEP 3: lockdownd_connect..."];
-    struct LockdowndClientHandle *lockdown = NULL;
-    err = lockdownd_connect(provider, &lockdown);
-    if (err) {
-        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
+    [self log:@"STEP 3: Connecting to lockdown..."];
+    err = lockdownd_connect(_provider, &_lockdown);
+    if (err || !_lockdown) {
+        [self log:[NSString stringWithFormat:@"FAILED to connect to lockdown: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
-        if (provider) idevice_provider_free(provider);
-        if (pairingFile) idevice_pairing_file_free(pairingFile);
+        [self cleanupConnection];
         return;
     }
 
-    [self log:@"STEP 4: lockdownd_start_session..."];
-    err = lockdownd_start_session(lockdown, pairingFile);
+    [self log:@"STEP 4: Starting session..."];
+    err = lockdownd_start_session(_lockdown, _pairingFile);
     if (err) {
-        [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
+        [self log:[NSString stringWithFormat:@"FAILED to start session: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
         if (err) idevice_error_free(err);
+        // We keep the connection open for debugging if needed, or cleanup
     } else {
-        [self log:@"STEP 5: lockdownd_get_value (DeviceName)..."];
+        [self log:@"Session started successfully!"];
+
+        [self log:@"STEP 5: Testing connection (get DeviceName)..."];
         plist_t val = NULL;
-        err = lockdownd_get_value(lockdown, "DeviceName", NULL, &val);
+        err = lockdownd_get_value(_lockdown, "DeviceName", NULL, &val);
         if (err) {
-            [self log:[NSString stringWithFormat:@"FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
+            [self log:[NSString stringWithFormat:@"FAILED to get DeviceName: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
             if (err) idevice_error_free(err);
         } else if (val) {
             char *name = NULL;
             plist_get_string_val(val, &name);
             if (name) {
-                [self log:[NSString stringWithFormat:@"SUCCESS: %s", name]];
+                [self log:[NSString stringWithFormat:@"RESULT: DeviceName = %s", name]];
                 plist_mem_free(name);
             }
             plist_free(val);
         }
     }
 
-    [self log:@"STEP 6: cleanup..."];
-    if (lockdown) lockdownd_client_free(lockdown);
-    if (provider) idevice_provider_free(provider);
-    if (pairingFile) idevice_pairing_file_free(pairingFile);
-    [self log:@"DONE."];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.disconnectButton setEnabled:YES];
+    });
+
+    [self log:@"Connection logic finished. Keeping handles alive."];
 }
 
 @end
