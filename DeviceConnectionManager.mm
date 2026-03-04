@@ -432,7 +432,8 @@
         }
 
         char **list = NULL;
-        struct IdeviceFfiError *err = afc_list_directory(self->_afc, [path UTF8String], &list);
+        size_t count = 0;
+        struct IdeviceFfiError *err = afc_list_directory(self->_afc, [path UTF8String], &list, &count);
         if (err) {
             [self log:[NSString stringWithFormat:@"[AFC] List failed: %s (%d)", err->message, err->code]];
             idevice_error_free(err);
@@ -442,7 +443,7 @@
 
         NSMutableArray *items = [NSMutableArray array];
         if (list) {
-            for (int i = 0; list[i]; i++) {
+            for (size_t i = 0; i < count; i++) {
                 NSString *name = [NSString stringWithUTF8String:list[i]];
                 if ([name isEqualToString:@"."] || [name isEqualToString:@".."]) {
                     plist_mem_free(list[i]);

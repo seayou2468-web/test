@@ -3,6 +3,7 @@
 #import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
 #import "LocationPickerViewController.h"
+#import "AFCViewController.h"
 
 @interface ViewController () <DeviceConnectionManagerDelegate, UIDocumentPickerDelegate, UITableViewDelegate, UITableViewDataSource, LocationPickerDelegate>
 @property (nonatomic, strong) DeviceConnectionManager *connectionManager;

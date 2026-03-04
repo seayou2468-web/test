@@ -374,7 +374,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     MKLocalSearch *search = [[MKLocalSearch alloc] initWithRequest:request];
     [search startWithCompletionHandler:^(MKLocalSearchResponse *response, NSError *error) {
         if (response.mapItems.count > 0) {
-            [self.mapView setCenterCoordinate:response.mapItems.firstObject.placemark.coordinate animated:YES];
+            [self.mapView setCenterCoordinate:response.mapItems.firstObject.location.coordinate animated:YES];
         }
     }];
 }
