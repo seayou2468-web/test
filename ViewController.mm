@@ -188,6 +188,7 @@ extern "C" {
 
     [self log:@"[STEP 2] Calling idevice_tcp_provider_new..."];
     err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, _pairingFile, "test-app", &_provider);
+    _pairingFile = NULL; // Consumed by the provider
     if (err || !_provider) {
         [self log:[NSString stringWithFormat:@"[ERROR] Provider creation: %s (%d)", err ? err->message : "NULL_ERR", err ? err->code : -1]];
         if (err) { idevice_error_free(err); err = NULL; }
@@ -195,7 +196,6 @@ extern "C" {
         return;
     }
     [self log:[NSString stringWithFormat:@"[OK] Provider created (%p).", _provider]];
-    if (err) { idevice_error_free(err); err = NULL; }
 
     if (!check()) return;
     [self log:@"[STEP 3] Calling lockdownd_connect..."];
@@ -207,19 +207,28 @@ extern "C" {
         return;
     }
     [self log:[NSString stringWithFormat:@"[OK] Lockdownd connected (%p).", _lockdown]];
-    if (err) { idevice_error_free(err); err = NULL; }
 
     if (!check()) return;
     [self log:@"[STEP 4] Calling lockdownd_start_session (TLS Handshake)..."];
-    err = lockdownd_start_session(_lockdown, _pairingFile);
-    if (err) {
-        [self log:[NSString stringWithFormat:@"[ERROR] Session start: %s (%d)", err->message ? err->message : "N/A", err->code]];
+    struct IdevicePairingFile *sessionPairingFile = NULL;
+    err = idevice_provider_get_pairing_file(_provider, &sessionPairingFile);
+    if (err || !sessionPairingFile) {
+        [self log:[NSString stringWithFormat:@"[ERROR] Failed to get pairing file from provider: %s (%d)", err ? err->message : "NULL_ERR", err ? err->code : -1]];
         if (err) { idevice_error_free(err); err = NULL; }
         [self cleanupInternal];
         return;
     }
+
+    err = lockdownd_start_session(_lockdown, sessionPairingFile);
+    idevice_pairing_file_free(sessionPairingFile); // We are responsible for this one
+
+    if (err) {
+        [self log:[NSString stringWithFormat:@"[ERROR] Session start: %s (%d)", err->message ? err->message : "N/A", err->code]];
+        idevice_error_free(err); err = NULL;
+        [self cleanupInternal];
+        return;
+    }
     [self log:@"[OK] Session established (Encrypted phase active)."];
-    if (err) { idevice_error_free(err); err = NULL; }
 
     if (!check()) return;
     [self log:@"[STEP 5] Calling heartbeat_connect..."];
