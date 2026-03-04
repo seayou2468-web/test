@@ -51,10 +51,10 @@ extern "C" {
     [self.disconnectButton setEnabled:NO];
     [[self view] addSubview:self.disconnectButton];
 
-    [self log:@"Initializing idevice logger..."];
+    [self log:@"Initializing idevice logger (Debug level)..."];
     idevice_init_logger(Debug, Debug, NULL);
 
-    [self log:@"App Initialized. Waiting for input."];
+    [self log:@"App Initialized. Sequence: TCP -> Lockdownd -> StartSession -> TLS."];
 }
 
 - (void)log:(NSString *)message {
@@ -75,7 +75,7 @@ extern "C" {
 }
 
 - (void)cleanupConnection {
-    [self log:@"Manual Cleanup Triggered."];
+    [self log:@"Cleanup Triggered."];
     if (_lockdown) {
         lockdownd_client_free(_lockdown);
         _lockdown = NULL;
@@ -122,6 +122,7 @@ extern "C" {
 
     [self cleanupConnection];
 
+    [self log:@"--- PHASE 1: TCP CONNECTION ---"];
     [self log:@"STEP 1: Reading pairing file..."];
     err = idevice_pairing_file_read([filePath UTF8String], &_pairingFile);
     if (err || !_pairingFile) {
@@ -131,7 +132,7 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 2: Creating TCP provider for 10.7.0.1..."];
+    [self log:@"STEP 2: Creating TCP provider for 10.7.0.1 (Wireless)..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
@@ -147,35 +148,52 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 3: Connecting to lockdown..."];
+    [self log:@"--- PHASE 2: LOCKDOWND HANDSHAKE ---"];
+    [self log:@"STEP 3: Connecting to lockdownd (Unencrypted phase)..."];
     err = lockdownd_connect(_provider, &_lockdown);
     if (err || !_lockdown) {
-        [self log:[NSString stringWithFormat:@"FAILED to connect to lockdown: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+        [self log:[NSString stringWithFormat:@"FAILED to connect to lockdownd: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
         [self cleanupConnection];
         return;
     }
 
-    [self log:@"STEP 4: Starting session..."];
+    [self log:@"STEP 4: Verifying pre-session communication (UniqueDeviceID)..."];
+    plist_t udidVal = NULL;
+    struct IdeviceFfiError *infoErr = lockdownd_get_value(_lockdown, "UniqueDeviceID", NULL, &udidVal);
+    if (!infoErr && udidVal) {
+        char *udid = NULL;
+        plist_get_string_val(udidVal, &udid);
+        if (udid) {
+            [self log:[NSString stringWithFormat:@"PRE-SESSION OK: UDID = %s", udid]];
+            plist_mem_free(udid);
+        }
+        plist_free(udidVal);
+    } else {
+        if (infoErr) idevice_error_free(infoErr);
+        [self log:@"Pre-session communication check failed (but might still proceed)."];
+    }
+
+    [self log:@"--- PHASE 3: STARTING SESSION & TLS ---"];
+    [self log:@"STEP 5: Sending StartSession request (Enabling TLS)..."];
     err = lockdownd_start_session(_lockdown, _pairingFile);
     if (err) {
-        [self log:[NSString stringWithFormat:@"FAILED to start session: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
+        [self log:[NSString stringWithFormat:@"FAILED to start session/TLS: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
         if (err) idevice_error_free(err);
-        // We keep the connection open for debugging if needed, or cleanup
     } else {
-        [self log:@"Session started successfully!"];
+        [self log:@"SUCCESS: TLS Handshake complete and Session established."];
 
-        [self log:@"STEP 5: Testing connection (get DeviceName)..."];
+        [self log:@"STEP 6: Verifying encrypted communication (DeviceName)..."];
         plist_t val = NULL;
         err = lockdownd_get_value(_lockdown, "DeviceName", NULL, &val);
         if (err) {
-            [self log:[NSString stringWithFormat:@"FAILED to get DeviceName: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
+            [self log:[NSString stringWithFormat:@"FAILED to verify encrypted comms: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
             if (err) idevice_error_free(err);
         } else if (val) {
             char *name = NULL;
             plist_get_string_val(val, &name);
             if (name) {
-                [self log:[NSString stringWithFormat:@"RESULT: DeviceName = %s", name]];
+                [self log:[NSString stringWithFormat:@"ENCRYPTED COMM OK: DeviceName = %s", name]];
                 plist_mem_free(name);
             }
             plist_free(val);
@@ -186,7 +204,7 @@ extern "C" {
         [self.disconnectButton setEnabled:YES];
     });
 
-    [self log:@"Connection logic finished. Keeping handles alive."];
+    [self log:@"Connection sequence finished. Keeping connection alive."];
 }
 
 @end
