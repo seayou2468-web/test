@@ -54,9 +54,7 @@ extern "C" {
 }
 
 - (void)selectPairingFile {
-    // iOS 14+ / iOS 26 initializer
-    UTType *itemType = UTTypeItem;
-    NSArray *types = [NSArray arrayWithObject:itemType];
+    NSArray *types = [NSArray arrayWithObject:UTTypeItem];
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
     [picker setDelegate:self];
     [self presentViewController:picker animated:YES completion:nil];
@@ -67,20 +65,27 @@ extern "C" {
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url = [urls firstObject];
     if (url) {
-        const char *utf8Path = [[url path] UTF8String];
-        std::string pathStr(utf8Path);
-        [self log:[NSString stringWithFormat:@"Selected file: %s", pathStr.c_str()]];
-        [self startConnectionWithPairingFile:[url path]];
+        // Critical for UIDocumentPicker on iOS
+        BOOL canAccess = [url startAccessingSecurityScopedResource];
+        [self log:[NSString stringWithFormat:@"Selected file: %@", [url path]]];
+
+        // We need to pass the URL or handle the data while access is granted.
+        // For simplicity, we'll read the pairing file now or pass the URL.
+        [self startConnectionWithURL:url accessGranted:canAccess];
     }
 }
 
-- (void)startConnectionWithPairingFile:(NSString *)filePath {
+- (void)startConnectionWithURL:(NSURL *)url accessGranted:(BOOL)accessGranted {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        [self performConnection:filePath];
+        [self performConnectionWithURL:url];
+        if (accessGranted) {
+            [url stopAccessingSecurityScopedResource];
+        }
     });
 }
 
-- (void)performConnection:(NSString *)filePath {
+- (void)performConnectionWithURL:(NSURL *)url {
+    NSString *filePath = [url path];
     struct IdevicePairingFile *pairingFile = NULL;
     struct IdeviceFfiError *err = NULL;
 
@@ -141,7 +146,8 @@ extern "C" {
         plist_get_string_val(deviceNameValue, &name);
         if (name) {
             [self log:[NSString stringWithFormat:@"Device Name: %s", name]];
-            free(name);
+            // libplist usually requires plist_mem_free for its allocated strings
+            plist_mem_free(name);
         }
         plist_free(deviceNameValue);
     }
