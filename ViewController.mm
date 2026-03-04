@@ -51,10 +51,10 @@ extern "C" {
     [self.disconnectButton setEnabled:NO];
     [[self view] addSubview:self.disconnectButton];
 
-    [self log:@"Initializing idevice logger (Debug level)..."];
+    [self log:@"Initializing idevice logger..."];
     idevice_init_logger(Debug, Debug, NULL);
 
-    [self log:@"App Initialized. Passing pairing file as bytes."];
+    [self log:@"App Initialized. Using idevice_pairing_file_read directly."];
 }
 
 - (void)log:(NSString *)message {
@@ -104,38 +104,34 @@ extern "C" {
         [self log:[NSString stringWithFormat:@"File picked: %@", path]];
         BOOL canAccess = [url startAccessingSecurityScopedResource];
 
-        NSData *pairingData = [NSData dataWithContentsOfFile:path];
-        if (canAccess) [url stopAccessingSecurityScopedResource];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.connectButton setEnabled:NO];
+        });
 
-        if (pairingData) {
-            [self log:[NSString stringWithFormat:@"Pairing file read into memory (%lu bytes).", (unsigned long)[pairingData length]]];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self.connectButton setEnabled:NO];
-            });
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                [self performConnectWithData:pairingData];
-            });
-        } else {
-            [self log:@"FAILED to read pairing file from disk."];
-        }
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            [self performConnect:path];
+            if (canAccess) {
+                [url stopAccessingSecurityScopedResource];
+            }
+        });
     }
 }
 
-- (void)performConnectWithData:(NSData *)pairingData {
+- (void)performConnect:(NSString *)filePath {
     struct IdeviceFfiError *err = NULL;
 
     [self cleanupConnection];
 
-    [self log:@"STEP 1: Creating pairing file structure from bytes..."];
-    err = idevice_pairing_file_from_bytes((const uint8_t *)[pairingData bytes], [pairingData length], &_pairingFile);
+    [self log:@"STEP 1: idevice_pairing_file_read (direct path)..."];
+    err = idevice_pairing_file_read([filePath UTF8String], &_pairingFile);
     if (err || !_pairingFile) {
-        [self log:[NSString stringWithFormat:@"FAILED to parse pairing file: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+        [self log:[NSString stringWithFormat:@"FAILED to read pairing file: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
         [self cleanupConnection];
         return;
     }
 
-    [self log:@"STEP 2: Creating TCP provider for 10.7.0.1..."];
+    [self log:@"STEP 2: idevice_tcp_provider_new (10.7.0.1)..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
@@ -151,7 +147,7 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 3: Connecting to lockdownd..."];
+    [self log:@"STEP 3: lockdownd_connect..."];
     err = lockdownd_connect(_provider, &_lockdown);
     if (err || !_lockdown) {
         [self log:[NSString stringWithFormat:@"FAILED to connect to lockdownd: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
@@ -160,7 +156,7 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 4: Starting session (Passing same pairing file structure)..."];
+    [self log:@"STEP 4: lockdownd_start_session..."];
     err = lockdownd_start_session(_lockdown, _pairingFile);
     if (err) {
         [self log:[NSString stringWithFormat:@"FAILED to start session: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
@@ -168,7 +164,7 @@ extern "C" {
     } else {
         [self log:@"SUCCESS: Session and TLS established."];
 
-        [self log:@"STEP 5: Verifying encrypted communication (DeviceName)..."];
+        [self log:@"STEP 5: lockdownd_get_value (DeviceName)..."];
         plist_t val = NULL;
         err = lockdownd_get_value(_lockdown, "DeviceName", NULL, &val);
         if (!err && val) {
@@ -188,7 +184,7 @@ extern "C" {
         [self.disconnectButton setEnabled:YES];
     });
 
-    [self log:@"Connection sequence complete."];
+    [self log:@"Connection sequence finished."];
 }
 
 @end
