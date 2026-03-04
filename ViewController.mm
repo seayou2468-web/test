@@ -54,10 +54,10 @@ extern "C" {
     [self.disconnectButton setEnabled:NO];
     [[self view] addSubview:self.disconnectButton];
 
-    [self log:@"Initializing idevice logger..."];
+    [self log:@"Initializing idevice logger (Debug level)..."];
     idevice_init_logger(Debug, Debug, NULL);
 
-    [self log:@"App Initialized. Target: 10.7.0.1 Port: 62078"];
+    [self log:@"App Initialized. Target: 10.7.0.1:62078"];
 }
 
 - (void)log:(NSString *)message {
@@ -128,6 +128,36 @@ extern "C" {
     }
 }
 
+- (void)inspectPairingFile:(struct IdevicePairingFile *)pairingFile {
+    uint8_t *data = NULL;
+    uintptr_t size = 0;
+    struct IdeviceFfiError *err = idevice_pairing_file_serialize(pairingFile, &data, &size);
+    if (!err && data) {
+        [self log:[NSString stringWithFormat:@"Pairing file size: %lu bytes", (unsigned long)size]];
+        plist_t plist = NULL;
+        if (plist_from_memory((const char *)data, (uint32_t)size, &plist) == PLIST_ERR_SUCCESS) {
+            plist_t hostIDNode = plist_dict_get_item(plist, "HostID");
+            if (hostIDNode) {
+                char *hostID = NULL;
+                plist_get_string_val(hostIDNode, &hostID);
+                if (hostID) {
+                    [self log:[NSString stringWithFormat:@"Found HostID in pairing file: %s", hostID]];
+                    plist_mem_free(hostID);
+                }
+            } else {
+                [self log:@"WARNING: HostID not found in pairing file dictionary!"];
+            }
+            plist_free(plist);
+        } else {
+            [self log:@"FAILED to parse pairing file as plist."];
+        }
+        idevice_outer_slice_free(data, size);
+    } else {
+        if (err) idevice_error_free(err);
+        [self log:@"FAILED to serialize pairing file."];
+    }
+}
+
 - (void)performConnect:(NSString *)filePath {
     struct IdeviceFfiError *err = NULL;
 
@@ -142,12 +172,14 @@ extern "C" {
         return;
     }
 
+    [self inspectPairingFile:_pairingFile];
+
     [self log:@"STEP 2: Creating TCP provider for 10.7.0.1:62078..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(62078); // Explicitly using 62078 as requested
+    addr.sin_port = htons(62078);
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
     err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, _pairingFile, "test-app", &_provider);
@@ -158,7 +190,7 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 3: Connecting to lockdownd..."];
+    [self log:@"STEP 3: Connecting to lockdownd (Unencrypted phase)..."];
     err = lockdownd_connect(_provider, &_lockdown);
     if (err || !_lockdown) {
         [self log:[NSString stringWithFormat:@"FAILED to connect to lockdownd: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
@@ -167,7 +199,23 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 4: lockdownd_start_session (Initiating TLS)..."];
+    [self log:@"Diagnostic: Attempting unencrypted get_value(UniqueDeviceID)..."];
+    plist_t udidVal = NULL;
+    struct IdeviceFfiError *udidErr = lockdownd_get_value(_lockdown, "UniqueDeviceID", NULL, &udidVal);
+    if (!udidErr && udidVal) {
+        char *udid = NULL;
+        plist_get_string_val(udidVal, &udid);
+        if (udid) {
+            [self log:[NSString stringWithFormat:@"Unencrypted UDID: %s", udid]];
+            plist_mem_free(udid);
+        }
+        plist_free(udidVal);
+    } else {
+        if (udidErr) idevice_error_free(udidErr);
+        [self log:@"Unencrypted communication test failed (Expected if already paired/locked)."];
+    }
+
+    [self log:@"STEP 4: lockdownd_start_session (Passing Pairing File with HostID)..."];
     err = lockdownd_start_session(_lockdown, _pairingFile);
     if (err) {
         [self log:[NSString stringWithFormat:@"FAILED to start session: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
@@ -191,7 +239,22 @@ extern "C" {
         });
     }
 
-    [self log:@"Connection logic finished."];
+    [self log:@"STEP 6: Verifying encrypted communication (DeviceName)..."];
+    plist_t val = NULL;
+    err = lockdownd_get_value(_lockdown, "DeviceName", NULL, &val);
+    if (!err && val) {
+        char *name = NULL;
+        plist_get_string_val(val, &name);
+        if (name) {
+            [self log:[NSString stringWithFormat:@"RESULT: DeviceName = %s", name]];
+            plist_mem_free(name);
+        }
+        plist_free(val);
+    } else {
+        if (err) idevice_error_free(err);
+    }
+
+    [self log:@"Connection sequence complete."];
 }
 
 - (void)onHeartbeatTimer {
