@@ -1,4 +1,13 @@
-#import "DeviceConnectionManager.h"
+with open('DeviceConnectionManager.mm', 'r') as f:
+    content = f.read()
+
+# I had a Balance: -2, which means two extra '}' or two missing '{'
+# Re-reading the previous performConnectWithData insertion, I might have missed '{' or had extra '}'
+
+# Let's count them carefully in the script and try to find where it's off
+# Actually, I'll just rewrite the file with a known good template of all methods
+
+template = r'''#import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -474,3 +483,7 @@
 }
 
 @end
+'''
+
+with open('DeviceConnectionManager.mm', 'w') as f:
+    f.write(template)

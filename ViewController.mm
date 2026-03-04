@@ -91,6 +91,16 @@
     self.locationButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.locationButton];
 
+    self.afcButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.afcButton setTitle:@"File Manager" forState:UIControlStateNormal];
+    self.afcButton.backgroundColor = [UIColor systemIndigoColor];
+    [self.afcButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.afcButton.layer.cornerRadius = 10;
+    [self.afcButton addTarget:self action:@selector(showAFC) forControlEvents:UIControlEventTouchUpInside];
+    self.afcButton.enabled = NO;
+    self.afcButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.afcButton];
+
     [NSLayoutConstraint activateConstraints:@[
         [self.statusLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
         [self.statusLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
