@@ -51,7 +51,7 @@
     [self.view addSubview:self.tableView];
 
     self.logView = [[UITextView alloc] init];
-    self.logView.setEditable(NO);
+    self.logView.editable = NO;
     self.logView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
     self.logView.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
     self.logView.layer.cornerRadius = 8;
@@ -74,7 +74,7 @@
     [self.disconnectButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.disconnectButton.layer.cornerRadius = 10;
     [self.disconnectButton addTarget:self action:@selector(cleanupConnection) forControlEvents:UIControlEventTouchUpInside];
-    self.disconnectButton.setEnabled(NO);
+    self.disconnectButton.enabled = NO;
     self.disconnectButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.disconnectButton];
 
@@ -84,7 +84,7 @@
     [self.locationButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.locationButton.layer.cornerRadius = 10;
     [self.locationButton addTarget:self action:@selector(showLocationPicker) forControlEvents:UIControlEventTouchUpInside];
-    self.locationButton.setEnabled(NO);
+    self.locationButton.enabled = NO;
     self.locationButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.locationButton];
 
@@ -163,9 +163,9 @@
             return;
         }
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self.connectButton setEnabled:NO];
-            [self.disconnectButton setEnabled:YES];
-            [self.locationButton setEnabled:YES];
+            self.connectButton.enabled = NO;
+            self.disconnectButton.enabled = YES;
+            self.locationButton.enabled = YES;
             [self.connectionManager connectWithData:data];
         });
     });
@@ -188,9 +188,9 @@
         self.statusLabel.text = [NSString stringWithFormat:@"Status: %@", status];
         self.statusLabel.textColor = color;
         if ([status isEqualToString:@"Released"]) {
-            [self.connectButton setEnabled:YES];
-            [self.disconnectButton setEnabled:NO];
-            [self.locationButton setEnabled:NO];
+            self.connectButton.enabled = YES;
+            self.disconnectButton.enabled = NO;
+            self.locationButton.enabled = NO;
         }
     });
 }
