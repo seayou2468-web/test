@@ -516,7 +516,6 @@ extern "C" {
     UIImageView *iconView = [[UIImageView alloc] init];
     iconView.image = [self.iconCache objectForKey:app[@"CFBundleIdentifier"]] ?: [UIImage systemImageNamed:@"app.dashed"];
     iconView.contentMode = UIViewContentModeScaleAspectFit;
-    [iconView heightAnchor].active = YES;
     [[iconView heightAnchor] constraintEqualToConstant:100].active = YES;
     [stackView addArrangedSubview:iconView];
 
