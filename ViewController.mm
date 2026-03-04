@@ -13,12 +13,14 @@ extern "C" {
 
 @interface ViewController () {
     struct IdevicePairingFile *_pairingFile;
-    struct IdeviceHandle *_device;
+    struct IdeviceProviderHandle *_provider;
     struct LockdowndClientHandle *_lockdown;
+    struct HeartbeatClientHandle *_heartbeat;
 }
 @property (nonatomic, strong) UITextView *logView;
 @property (nonatomic, strong) UIButton *connectButton;
 @property (nonatomic, strong) UIButton *disconnectButton;
+@property (nonatomic, strong) NSTimer *heartbeatTimer;
 @end
 
 @implementation ViewController
@@ -29,8 +31,9 @@ extern "C" {
     CGRect viewBounds = [[self view] bounds];
 
     _pairingFile = NULL;
-    _device = NULL;
+    _provider = NULL;
     _lockdown = NULL;
+    _heartbeat = NULL;
 
     self.logView = [[UITextView alloc] initWithFrame:CGRectMake(20, 100, viewBounds.size.width - 40, 350)];
     [self.logView setEditable:NO];
@@ -45,16 +48,16 @@ extern "C" {
     [[self view] addSubview:self.connectButton];
 
     self.disconnectButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.disconnectButton setTitle:@"Disconnect & Cleanup" forState:UIControlStateNormal];
+    [self.disconnectButton setTitle:@"Disconnect & Stop Heartbeat" forState:UIControlStateNormal];
     [self.disconnectButton setFrame:CGRectMake(20, 530, viewBounds.size.width - 40, 50)];
     [self.disconnectButton addTarget:self action:@selector(cleanupConnection) forControlEvents:UIControlEventTouchUpInside];
     [self.disconnectButton setEnabled:NO];
     [[self view] addSubview:self.disconnectButton];
 
-    [self log:@"Initializing idevice logger (Debug level)..."];
+    [self log:@"Initializing idevice logger..."];
     idevice_init_logger(Debug, Debug, NULL);
 
-    [self log:@"App Initialized. Sequence: TCP -> StartSession -> Lockdownd."];
+    [self log:@"App Initialized. Sequence: Provider -> Lockdownd -> StartSession/TLS -> Heartbeat."];
 }
 
 - (void)log:(NSString *)message {
@@ -75,14 +78,22 @@ extern "C" {
 }
 
 - (void)cleanupConnection {
-    [self log:@"Cleanup Triggered."];
+    [self log:@"Cleanup Triggered. Stopping Heartbeat..."];
+    if (self.heartbeatTimer) {
+        [self.heartbeatTimer invalidate];
+        self.heartbeatTimer = nil;
+    }
+    if (_heartbeat) {
+        heartbeat_client_free(_heartbeat);
+        _heartbeat = NULL;
+    }
     if (_lockdown) {
         lockdownd_client_free(_lockdown);
         _lockdown = NULL;
     }
-    if (_device) {
-        idevice_free(_device);
-        _device = NULL;
+    if (_provider) {
+        idevice_provider_free(_provider);
+        _provider = NULL;
     }
     if (_pairingFile) {
         idevice_pairing_file_free(_pairingFile);
@@ -131,7 +142,7 @@ extern "C" {
         return;
     }
 
-    [self log:@"STEP 2: Connecting to 10.7.0.1 (TCP)..."];
+    [self log:@"STEP 2: Creating TCP provider for 10.7.0.1..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_len = sizeof(addr);
@@ -139,61 +150,71 @@ extern "C" {
     addr.sin_port = htons(LOCKDOWN_PORT);
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
-    err = idevice_new_tcp_socket((const idevice_sockaddr *)&addr, sizeof(addr), "test-app", &_device);
-    if (err || !_device) {
-        [self log:[NSString stringWithFormat:@"FAILED to create device socket: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+    err = idevice_tcp_provider_new((const idevice_sockaddr *)&addr, _pairingFile, "test-app", &_provider);
+    if (err || !_provider) {
+        [self log:[NSString stringWithFormat:@"FAILED to create provider: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
         [self cleanupConnection];
         return;
     }
 
-    [self log:@"STEP 3: Starting session (idevice_start_session)..."];
-    err = idevice_start_session(_device, _pairingFile, false);
-    if (err) {
-        [self log:[NSString stringWithFormat:@"FAILED with legacy=false: %s (%d). Retrying with legacy=true...", (err && err->message) ? err->message : "N/A", err->code]];
-        idevice_error_free(err);
-
-        err = idevice_start_session(_device, _pairingFile, true);
-        if (err) {
-            [self log:[NSString stringWithFormat:@"FAILED with legacy=true: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
-            idevice_error_free(err);
-            [self cleanupConnection];
-            return;
-        }
-    }
-
-    [self log:@"SUCCESS: Session started."];
-
-    [self log:@"STEP 4: Connecting to lockdownd service..."];
-    err = lockdownd_new(_device, &_lockdown);
+    [self log:@"STEP 3: Connecting to lockdownd (Unencrypted phase)..."];
+    err = lockdownd_connect(_provider, &_lockdown);
     if (err || !_lockdown) {
-        [self log:[NSString stringWithFormat:@"FAILED to create lockdown client: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+        [self log:[NSString stringWithFormat:@"FAILED to connect to lockdownd: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
         if (err) idevice_error_free(err);
         [self cleanupConnection];
         return;
     }
 
-    [self log:@"STEP 5: Verifying encrypted communication (DeviceName)..."];
-    plist_t val = NULL;
-    err = lockdownd_get_value(_lockdown, "DeviceName", NULL, &val);
+    [self log:@"STEP 4: Sending StartSession request (Initiating TLS Handshake)..."];
+    err = lockdownd_start_session(_lockdown, _pairingFile);
     if (err) {
-        [self log:[NSString stringWithFormat:@"FAILED to get DeviceName: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
+        [self log:[NSString stringWithFormat:@"FAILED to start session: %s (%d)", (err && err->message) ? err->message : "N/A", err->code]];
         if (err) idevice_error_free(err);
-    } else if (val) {
-        char *name = NULL;
-        plist_get_string_val(val, &name);
-        if (name) {
-            [self log:[NSString stringWithFormat:@"RESULT: DeviceName = %s", name]];
-            plist_mem_free(name);
-        }
-        plist_free(val);
+        [self cleanupConnection];
+        return;
     }
 
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.disconnectButton setEnabled:YES];
-    });
+    [self log:@"SUCCESS: TLS Handshake complete. Session established."];
 
-    [self log:@"Connection sequence complete."];
+    [self log:@"STEP 5: Connecting to Heartbeat service..."];
+    err = heartbeat_connect(_provider, &_heartbeat);
+    if (err || !_heartbeat) {
+        [self log:[NSString stringWithFormat:@"FAILED to connect to Heartbeat: %s (%d)", (err && err->message) ? err->message : "N/A", err ? err->code : -1]];
+        if (err) idevice_error_free(err);
+    } else {
+        [self log:@"SUCCESS: Heartbeat connected. Starting timer (every 10s)..."];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.heartbeatTimer = [NSTimer scheduledTimerWithTimeInterval:10.0 target:self selector:@selector(onHeartbeatTimer) userInfo:nil repeats:YES];
+            [self.disconnectButton setEnabled:YES];
+        });
+    }
+
+    [self log:@"Connection sequence complete. Maintaining session."];
+}
+
+- (void)onHeartbeatTimer {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        if (!_heartbeat) return;
+
+        [self log:@"Sending Heartbeat Polo..."];
+        struct IdeviceFfiError *err = heartbeat_send_polo(_heartbeat);
+        if (err) {
+            [self log:[NSString stringWithFormat:@"Heartbeat Polo FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
+            idevice_error_free(err);
+        } else {
+            [self log:@"Receiving Heartbeat Marco..."];
+            uint64_t interval = 0;
+            err = heartbeat_get_marco(_heartbeat, 1000, &interval);
+            if (err) {
+                [self log:[NSString stringWithFormat:@"Heartbeat Marco FAILED: %s (%d)", err->message ? err->message : "N/A", err->code]];
+                idevice_error_free(err);
+            } else {
+                [self log:[NSString stringWithFormat:@"Heartbeat OK (Interval: %llu)", interval]];
+            }
+        }
+    });
 }
 
 @end
