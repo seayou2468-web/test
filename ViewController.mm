@@ -90,14 +90,23 @@ extern "C" {
     err = idevice_pairing_file_read([filePath UTF8String], &pairingFile);
     if (err) {
         [self log:[NSString stringWithFormat:@"Error reading pairing file: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
-        idevice_error_free(err);
+        if (err) idevice_error_free(err);
         return;
+    }
+
+    // Diagnostic: verify pairing file content
+    uint8_t *serializedData = NULL;
+    uintptr_t serializedSize = 0;
+    idevice_pairing_file_serialize(pairingFile, &serializedData, &serializedSize);
+    if (serializedData) {
+        [self log:[NSString stringWithFormat:@"Pairing file read successfully (%lu bytes)", (unsigned long)serializedSize]];
+        idevice_outer_slice_free(serializedData, serializedSize);
     }
 
     [self log:@"Creating TCP provider for 10.7.0.1..."];
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
-    addr.sin_len = sizeof(addr); // REQUIRED on iOS/macOS
+    addr.sin_len = sizeof(addr);
     addr.sin_family = AF_INET;
     addr.sin_port = htons(LOCKDOWN_PORT);
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
@@ -122,34 +131,48 @@ extern "C" {
         return;
     }
 
+    // Diagnostic: Try to get basic info before session
+    [self log:@"Connected. Attempting to get UniqueDeviceID..."];
+    plist_t udidValue = NULL;
+    struct IdeviceFfiError *udidErr = lockdownd_get_value(lockdown, "UniqueDeviceID", NULL, &udidValue);
+    if (!udidErr && udidValue) {
+        char *udid = NULL;
+        plist_get_string_val(udidValue, &udid);
+        if (udid) {
+            [self log:[NSString stringWithFormat:@"UniqueDeviceID: %s", udid]];
+            plist_mem_free(udid);
+        }
+        plist_free(udidValue);
+    } else {
+        if (udidErr) idevice_error_free(udidErr);
+    }
+
     [self log:@"Starting session..."];
     err = lockdownd_start_session(lockdown, pairingFile);
     if (err) {
         [self log:[NSString stringWithFormat:@"Error starting session: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
+        if (err->code == -10) {
+            [self log:@"Note: InvalidHostID might mean the pairing file does not match this device."];
+        }
         if (err) idevice_error_free(err);
-        if (lockdown) lockdownd_client_free(lockdown);
-        if (provider) idevice_provider_free(provider);
-        if (pairingFile) idevice_pairing_file_free(pairingFile);
-        return;
-    }
-
-    [self log:@"Connection successful! Getting DeviceName..."];
-    plist_t deviceNameValue = NULL;
-    err = lockdownd_get_value(lockdown, "DeviceName", NULL, &deviceNameValue);
-    if (err) {
-        [self log:[NSString stringWithFormat:@"Error getting DeviceName: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
-        if (err) idevice_error_free(err);
+        // Continue to cleanup
     } else {
-        if (deviceNameValue) {
-            char *name = NULL;
-            plist_get_string_val(deviceNameValue, &name);
-            if (name) {
-                [self log:[NSString stringWithFormat:@"Device Name: %s", name]];
-                plist_mem_free(name);
-            }
-            plist_free(deviceNameValue);
+        [self log:@"Session started successfully! Getting DeviceName..."];
+        plist_t deviceNameValue = NULL;
+        err = lockdownd_get_value(lockdown, "DeviceName", NULL, &deviceNameValue);
+        if (err) {
+            [self log:[NSString stringWithFormat:@"Error getting DeviceName: %s (code: %d)", err->message ? err->message : "unknown", err->code]];
+            if (err) idevice_error_free(err);
         } else {
-            [self log:@"DeviceName value is NULL"];
+            if (deviceNameValue) {
+                char *name = NULL;
+                plist_get_string_val(deviceNameValue, &name);
+                if (name) {
+                    [self log:[NSString stringWithFormat:@"Device Name: %s", name]];
+                    plist_mem_free(name);
+                }
+                plist_free(deviceNameValue);
+            }
         }
     }
 
