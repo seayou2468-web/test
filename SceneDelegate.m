@@ -6,7 +6,8 @@
     UIWindowScene *windowScene = (UIWindowScene *)scene;
     self.window = [[UIWindow alloc] initWithWindowScene:windowScene];
     ViewController *vc = [[ViewController alloc] init];
-    [self.window setRootViewController:vc];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self.window setRootViewController:nav];
     [self.window makeKeyAndVisible];
 }
 @end

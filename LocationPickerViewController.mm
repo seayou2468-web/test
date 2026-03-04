@@ -408,7 +408,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 
 - (void)doneTapped {
     [self stopSimulation];
-    [self dismissViewControllerAnimated:YES completion:nil];
+    [self.navigationController popViewControllerAnimated:YES];
 }
 
 #pragma mark - CLLocationManagerDelegate

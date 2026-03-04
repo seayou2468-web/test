@@ -142,9 +142,7 @@
     [self managerDidLog:@"[UI] User clicked Simulate Location button."];
     LocationPickerViewController *picker = [[LocationPickerViewController alloc] init];
     picker.delegate = self;
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
-    nav.modalPresentationStyle = UIModalPresentationFullScreen;
-    [self presentViewController:nav animated:YES completion:nil];
+    [self.navigationController pushViewController:picker animated:YES];
 }
 
 #pragma mark - UIDocumentPickerDelegate
