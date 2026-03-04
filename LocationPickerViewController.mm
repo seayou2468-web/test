@@ -17,6 +17,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
 @property (nonatomic, strong) JoystickView *joystick;
 @property (nonatomic, strong) UIButton *actionButton;
 @property (nonatomic, strong) UIButton *resetButton;
+@property (nonatomic, strong) UIButton *manualButton;
 @property (nonatomic, strong) UILabel *statusLabel;
 
 @property (nonatomic, strong) NSMutableArray<MKPointAnnotation *> *waypoints;
@@ -99,9 +100,16 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     self.resetButton.translatesAutoresizingMaskIntoConstraints = NO;
     [panel addSubview:self.resetButton];
 
+    self.manualButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.manualButton setTitle:@"Manual Edit" forState:UIControlStateNormal];
+    [self.manualButton setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
+    [self.manualButton addTarget:self action:@selector(manualTapped) forControlEvents:UIControlEventTouchUpInside];
+    self.manualButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [panel addSubview:self.manualButton];
+
     self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.font = [UIFont fontWithName:@"Menlo" size:10];
-    self.statusLabel.text = @"Tap map to add waypoints";
+    self.statusLabel.text = @"Tap map or use search to begin";
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [panel addSubview:self.statusLabel];
 
@@ -139,12 +147,17 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         [self.actionButton.topAnchor constraintEqualToAnchor:self.joystick.topAnchor],
         [self.actionButton.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-20],
         [self.actionButton.leadingAnchor constraintEqualToAnchor:self.joystick.trailingAnchor constant:20],
-        [self.actionButton.heightAnchor constraintEqualToConstant:50],
+        [self.actionButton.heightAnchor constraintEqualToConstant:40],
 
-        [self.resetButton.bottomAnchor constraintEqualToAnchor:self.joystick.bottomAnchor],
+        [self.resetButton.centerYAnchor constraintEqualToAnchor:self.joystick.centerYAnchor],
         [self.resetButton.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-20],
         [self.resetButton.leadingAnchor constraintEqualToAnchor:self.joystick.trailingAnchor constant:20],
-        [self.resetButton.heightAnchor constraintEqualToConstant:50],
+        [self.resetButton.heightAnchor constraintEqualToConstant:40],
+
+        [self.manualButton.bottomAnchor constraintEqualToAnchor:self.joystick.bottomAnchor],
+        [self.manualButton.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-20],
+        [self.manualButton.leadingAnchor constraintEqualToAnchor:self.joystick.trailingAnchor constant:20],
+        [self.manualButton.heightAnchor constraintEqualToConstant:40],
 
         [self.statusLabel.bottomAnchor constraintEqualToAnchor:panel.bottomAnchor constant:-10],
         [self.statusLabel.centerXAnchor constraintEqualToAnchor:panel.centerXAnchor]
@@ -206,11 +219,34 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     SimulationMode mode = (SimulationMode)self.modeControl.selectedSegmentIndex;
     if (mode == ModeTeleport) {
         [self.delegate didSelectLocation:self.waypoints.lastObject.coordinate];
+        self.statusLabel.text = [NSString stringWithFormat:@"Teleported: %.5f, %.5f", self.waypoints.lastObject.coordinate.latitude, self.waypoints.lastObject.coordinate.longitude];
     } else if (mode == ModeRoad) {
         [self calculateAndStartRoadRoute];
     } else {
         [self startMovementSimulation];
     }
+}
+
+- (void)manualTapped {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Manual Location" message:@"Enter coordinates" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.placeholder = @"Latitude"; tf.keyboardType = UIKeyboardTypeDecimalPad; }];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.placeholder = @"Longitude"; tf.keyboardType = UIKeyboardTypeDecimalPad; }];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"Set" style:UIAlertActionActionStyleDefault handler:^(UIAlertAction *action) {
+        double lat = [alert.textFields[0].text doubleValue];
+        double lon = [alert.textFields[1].text doubleValue];
+        CLLocationCoordinate2D coord = CLLocationCoordinate2DMake(lat, lon);
+        [self clearWaypoints];
+        MKPointAnnotation *pin = [[MKPointAnnotation alloc] init];
+        pin.coordinate = coord;
+        [self.waypoints addObject:pin];
+        [self.mapView addAnnotation:pin];
+        [self.mapView setCenterCoordinate:coord animated:YES];
+        [self.delegate didSelectLocation:coord];
+        [self updateStatus];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)startMovementSimulation {
@@ -246,6 +282,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
         );
     }
     [self.delegate didSelectLocation:self.currentSimulatedLocation];
+    self.statusLabel.text = [NSString stringWithFormat:@"Simulating: %.5f, %.5f", self.currentSimulatedLocation.latitude, self.currentSimulatedLocation.longitude];
 }
 
 - (void)calculateAndStartRoadRoute {
@@ -282,6 +319,7 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     newCoord.longitude += offset.x * step;
     [self.mapView setCenterCoordinate:newCoord animated:NO];
     [self.delegate didSelectLocation:newCoord];
+    self.statusLabel.text = [NSString stringWithFormat:@"Manual: %.5f, %.5f", newCoord.latitude, newCoord.longitude];
 }
 
 - (void)joystickDidRelease {}
@@ -309,15 +347,17 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     [self stopSimulation];
     [self clearWaypoints];
     [self.delegate didRequestClearSimulation];
+    self.statusLabel.text = @"Reset to Real Location";
 }
 
 - (void)modeChanged {
     [self stopSimulation];
     [self clearWaypoints];
+    self.statusLabel.text = @"Mode changed. Tap map to set waypoints.";
 }
 
 - (void)updateStatus {
-    self.statusLabel.text = [NSString stringWithFormat:@"Waypoints: %lu", (unsigned long)self.waypoints.count];
+    self.statusLabel.text = [NSString stringWithFormat:@"Waypoints: %lu | Lat: %.4f, Lon: %.4f", (unsigned long)self.waypoints.count, self.waypoints.lastObject.coordinate.latitude, self.waypoints.lastObject.coordinate.longitude];
 }
 
 - (void)doneTapped {

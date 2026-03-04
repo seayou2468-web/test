@@ -191,6 +191,10 @@
             self.connectButton.enabled = YES;
             self.disconnectButton.enabled = NO;
             self.locationButton.enabled = NO;
+        } else if ([status isEqualToString:@"Connected"]) {
+            self.connectButton.enabled = NO;
+            self.disconnectButton.enabled = YES;
+            self.locationButton.enabled = YES;
         }
     });
 }
