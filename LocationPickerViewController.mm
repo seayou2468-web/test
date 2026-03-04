@@ -110,8 +110,15 @@ typedef NS_ENUM(NSInteger, SimulationMode) {
     self.actionButton.translatesAutoresizingMaskIntoConstraints = NO;
     [panel addSubview:self.actionButton];
 
+    self.clearSelectionButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.clearSelectionButton setTitle:@"Clear Waypoints" forState:UIControlStateNormal];
+    [self.clearSelectionButton setTitleColor:[UIColor systemOrangeColor] forState:UIControlStateNormal];
+    [self.clearSelectionButton addTarget:self action:@selector(clearWaypoints) forControlEvents:UIControlEventTouchUpInside];
+    self.clearSelectionButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [panel addSubview:self.clearSelectionButton];
+
     self.resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.resetButton setTitle:@"Reset" forState:UIControlStateNormal];
+    [self.resetButton setTitle:@"Device Reset" forState:UIControlStateNormal];
     [self.resetButton setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
     [self.resetButton addTarget:self action:@selector(resetTapped) forControlEvents:UIControlEventTouchUpInside];
     self.resetButton.translatesAutoresizingMaskIntoConstraints = NO;
