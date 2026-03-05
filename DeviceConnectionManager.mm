@@ -164,7 +164,7 @@
                         _rsdHandshake = NULL; // consumed
                         if (!err && _remoteServer) {
                             location_simulation_new(_remoteServer, &_locationSimulationNew);
-                            app_service_connect_rsd(_adapter, &_appService);
+                            app_service_connect_rsd(_adapter, _rsdHandshake, &_appService);
                         }
                     }
                 }
@@ -186,7 +186,7 @@
     if (_misagent) { misagent_client_free(_misagent); _misagent = NULL; }
     if (_diagnostics) { diagnostics_relay_client_free(_diagnostics); _diagnostics = NULL; }
     if (_locationSimulationNew) { location_simulation_free(_locationSimulationNew); _locationSimulationNew = NULL; }
-    if (_appService) { app_service_client_free(_appService); _appService = NULL; }
+    if (_appService) { app_service_free(_appService); _appService = NULL; }
     if (_remoteServer) { remote_server_free(_remoteServer); _remoteServer = NULL; }
     if (_rsdHandshake) { rsd_handshake_free(_rsdHandshake); _rsdHandshake = NULL; }
     if (_adapter) { adapter_free(_adapter); _adapter = NULL; }
@@ -219,12 +219,11 @@
         if (!self->_provider) return;
         if (!self->_heartbeat) heartbeat_connect(self->_provider, &self->_heartbeat);
         if (self->_heartbeat) {
-            plist_t response = NULL;
-            struct IdeviceFfiError *err = heartbeat_get_marco(self->_heartbeat, &response);
-            if (response) {
+            uint64_t next_interval = 0;
+            struct IdeviceFfiError *err = heartbeat_get_marco(self->_heartbeat, 10000, &next_interval);
+            if (!err) {
                 heartbeat_send_polo(self->_heartbeat);
-                plist_free(response);
-            } else if (err) {
+            } else {
                 idevice_error_free(err);
             }
         }
@@ -335,14 +334,14 @@
     dispatch_async(_connectionQueue, ^{
         if (!self->_afc) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"AFC" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"AFC not connected"}]); }); return; }
         struct AfcFileHandle *fh = NULL;
-        struct IdeviceFfiError *err = afc_file_open(self->_afc, [path UTF8String], 1, &fh);
+        struct IdeviceFfiError *err = afc_file_open(self->_afc, [path UTF8String], AfcRdOnly, &fh);
         if (!err && fh) {
-            uint8_t *buf = NULL; uint64_t len = 0;
+            uint8_t *buf = NULL; size_t len = 0;
             err = afc_file_read_entire(fh, &buf, &len);
             afc_file_close(fh);
             if (!err) {
                 NSData *data = [NSData dataWithBytes:buf length:len];
-                afc_file_read_data_free(buf, (size_t)len);
+                afc_file_read_data_free(buf, len);
                 dispatch_async(dispatch_get_main_queue(), ^{ completion(data, nil); });
                 return;
             }
@@ -356,10 +355,9 @@
     dispatch_async(_connectionQueue, ^{
         if (!self->_afc) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"AFC" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"AFC not connected"}]); }); return; }
         struct AfcFileHandle *fh = NULL;
-        struct IdeviceFfiError *err = afc_file_open(self->_afc, [path UTF8String], 4, &fh);
+        struct IdeviceFfiError *err = afc_file_open(self->_afc, [path UTF8String], AfcWr, &fh);
         if (!err && fh) {
-            uint32_t written = 0;
-            err = afc_file_write(fh, (const uint8_t *)data.bytes, (uint32_t)data.length, &written);
+            err = afc_file_write(fh, (const uint8_t *)data.bytes, (size_t)data.length);
             afc_file_close(fh);
         }
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"AFC" code:-4 userInfo:@{NSLocalizedDescriptionKey: @"Write failed"}]); }); }
@@ -436,7 +434,7 @@
     _syslogRunning = YES;
     dispatch_async(_connectionQueue, ^{
         if (!self->_provider) return;
-        if (!self->_syslog) syslog_relay_client_connect(self->_provider, &self->_syslog);
+        if (!self->_syslog) syslog_relay_connect_tcp(self->_provider, &self->_syslog);
         if (self->_syslog) {
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
                 while (self->_syslogRunning && self->_syslog) {
@@ -475,11 +473,11 @@
 - (void)fetchHomeScreenWallpaperWithCompletion:(void (^)(UIImage *image, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_springboard) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"SB" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
-        uint8_t *buf = NULL; size_t len = 0;
+        void *buf = NULL; size_t len = 0;
         struct IdeviceFfiError *err = springboard_services_get_home_screen_wallpaper_preview(self->_springboard, &buf, &len);
         if (!err && buf) {
             UIImage *img = [UIImage imageWithData:[NSData dataWithBytes:buf length:len]];
-            idevice_data_free(buf, (uintptr_t)len);
+            idevice_data_free((uint8_t *)buf, (uintptr_t)len);
             dispatch_async(dispatch_get_main_queue(), ^{ completion(img, nil); });
         } else {
             if (err) idevice_error_free(err);
@@ -491,11 +489,11 @@
 - (void)fetchLockScreenWallpaperWithCompletion:(void (^)(UIImage *image, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_springboard) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"SB" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
-        uint8_t *buf = NULL; size_t len = 0;
+        void *buf = NULL; size_t len = 0;
         struct IdeviceFfiError *err = springboard_services_get_lock_screen_wallpaper_preview(self->_springboard, &buf, &len);
         if (!err && buf) {
             UIImage *img = [UIImage imageWithData:[NSData dataWithBytes:buf length:len]];
-            idevice_data_free(buf, (uintptr_t)len);
+            idevice_data_free((uint8_t *)buf, (uintptr_t)len);
             dispatch_async(dispatch_get_main_queue(), ^{ completion(img, nil); });
         } else {
             if (err) idevice_error_free(err);
@@ -507,7 +505,7 @@
 - (void)restartDeviceWithCompletion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_diagnostics) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Diag" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
-        struct IdeviceFfiError *err = diagnostics_relay_client_restart(self->_diagnostics, 1);
+        struct IdeviceFfiError *err = diagnostics_relay_client_restart(self->_diagnostics);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Diag" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed"}]); }); }
         else dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
     });
@@ -540,9 +538,7 @@
 - (void)installProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_misagent) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Misagent" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
-        plist_t p = [PlistUtils plistFromObject:profileData];
-        struct IdeviceFfiError *err = misagent_install(self->_misagent, p);
-        if (p) plist_free(p);
+        struct IdeviceFfiError *err = misagent_install(self->_misagent, (const uint8_t *)profileData.bytes, (size_t)profileData.length);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Misagent" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Failed"}]); }); }
         else dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
     });
