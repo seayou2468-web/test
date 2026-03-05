@@ -5,6 +5,7 @@
 #import "PlistUtils.h"
 #import "LocationPickerViewController.h"
 #import "AFCViewController.h"
+#import "NotificationViewController.h"
 
 @interface ViewController () <DeviceConnectionManagerDelegate, UIDocumentPickerDelegate, UITableViewDelegate, UITableViewDataSource, LocationPickerDelegate>
 @property (nonatomic, strong) DeviceConnectionManager *connectionManager;
@@ -16,6 +17,7 @@
 @property (nonatomic, strong) UIButton *afcButton;
 @property (nonatomic, strong) UIButton *mountButton;
 @property (nonatomic, strong) UIButton *autoMountButton;
+@property (nonatomic, strong) UIButton *proxyButton;
 @property (nonatomic, strong) NSCache<NSString *, UIImage *> *iconCache;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray<NSDictionary *> *appList;
@@ -121,9 +123,19 @@ static char kIsMountKey;
     [self.autoMountButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.autoMountButton.layer.cornerRadius = 10;
     [self.autoMountButton addTarget:self action:@selector(autoMountTapped) forControlEvents:UIControlEventTouchUpInside];
-    self.autoMountButton.enabled = NO;
+    self.autoMountButton.enabled = NO; self.proxyButton.enabled = NO;
     self.autoMountButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.autoMountButton];
+
+    self.proxyButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.proxyButton setTitle:"Notification Proxy" forState:UIControlStateNormal];
+    self.proxyButton.backgroundColor = [UIColor systemPinkColor];
+    [self.proxyButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.proxyButton.layer.cornerRadius = 10;
+    [self.proxyButton addTarget:self action:@selector(proxyTapped) forControlEvents:UIControlEventTouchUpInside];
+    self.proxyButton.enabled = NO;
+    self.proxyButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.proxyButton];
 
     [NSLayoutConstraint activateConstraints:@[
         [self.statusLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
@@ -166,10 +178,15 @@ static char kIsMountKey;
         [self.mountButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
         [self.mountButton.heightAnchor constraintEqualToConstant:40],
 
-        [self.autoMountButton.bottomAnchor constraintEqualToAnchor:self.disconnectButton.topAnchor constant:-10],
+        [self.autoMountButton.bottomAnchor constraintEqualToAnchor:self.proxyButton.topAnchor constant:-10],
         [self.autoMountButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
         [self.autoMountButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
         [self.autoMountButton.heightAnchor constraintEqualToConstant:40],
+
+        [self.proxyButton.bottomAnchor constraintEqualToAnchor:self.disconnectButton.topAnchor constant:-10],
+        [self.proxyButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.proxyButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.proxyButton.heightAnchor constraintEqualToConstant:40],
 
         [self.disconnectButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
         [self.disconnectButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
@@ -218,6 +235,12 @@ static char kIsMountKey;
     [self.navigationController pushViewController:picker animated:YES];
 }
 
+- (void)proxyTapped {
+    NotificationViewController *proxy = [[NotificationViewController alloc] init];
+    proxy.connectionManager = self.connectionManager;
+    [self.navigationController pushViewController:proxy animated:YES];
+}
+
 - (void)showAFC {
     AFCViewController *afc = [[AFCViewController alloc] init];
     afc.connectionManager = self.connectionManager;
@@ -262,7 +285,7 @@ static char kIsMountKey;
         dispatch_async(dispatch_get_main_queue(), ^{
             self.connectButton.enabled = NO;
             self.disconnectButton.enabled = YES;
-            self.locationButton.enabled = YES; self.afcButton.enabled = YES; self.mountButton.enabled = YES; self.autoMountButton.enabled = YES;
+            self.locationButton.enabled = YES; self.afcButton.enabled = YES; self.mountButton.enabled = YES; self.autoMountButton.enabled = YES; self.proxyButton.enabled = YES;
             [self.connectionManager connectWithData:data];
         });
     });
@@ -287,11 +310,11 @@ static char kIsMountKey;
         if ([status isEqualToString:@"Released"]) {
             self.connectButton.enabled = YES;
             self.disconnectButton.enabled = NO;
-            self.locationButton.enabled = NO; self.afcButton.enabled = NO; self.mountButton.enabled = NO; self.autoMountButton.enabled = NO;
+            self.locationButton.enabled = NO; self.afcButton.enabled = NO; self.mountButton.enabled = NO; self.autoMountButton.enabled = NO; self.proxyButton.enabled = NO;
         } else if ([status isEqualToString:@"Connected"]) {
             self.connectButton.enabled = NO;
             self.disconnectButton.enabled = YES;
-            self.locationButton.enabled = YES; self.afcButton.enabled = YES; self.mountButton.enabled = YES; self.autoMountButton.enabled = YES;
+            self.locationButton.enabled = YES; self.afcButton.enabled = YES; self.mountButton.enabled = YES; self.autoMountButton.enabled = YES; self.proxyButton.enabled = YES;
         }
     });
 }
