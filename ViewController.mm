@@ -400,15 +400,18 @@ static char kIsMountKey;
     UIButton *jitBtn = [self createButton:@"Enable JIT" color:[UIColor systemGreenColor] action:@selector(enableJITTapped)];
     UIButton *unBtn = [self createButton:@"Uninstall App" color:[UIColor systemRedColor] action:@selector(uninstallTapped)];
     [footer addSubview:jitBtn]; [footer addSubview:unBtn];
+    UIView *vJit = (UIView *)jitBtn;
+    UIView *vUn = (UIView *)unBtn;
+    UIView *vFooter = (UIView *)footer;
     [NSLayoutConstraint activateConstraints:@[
-        [((UIView *)jitBtn).topAnchor constraintEqualToAnchor:((UIView *)footer).topAnchor constant:10],
-        [((UIView *)jitBtn).centerXAnchor constraintEqualToAnchor:((UIView *)footer).centerXAnchor],
-        [jitBtn.widthAnchor constraintEqualToConstant:140],
-        [jitBtn.heightAnchor constraintEqualToConstant:34],
-        [((UIView *)unBtn).topAnchor constraintEqualToAnchor:((UIView *)jitBtn).bottomAnchor constant:10],
-        [((UIView *)unBtn).centerXAnchor constraintEqualToAnchor:((UIView *)footer).centerXAnchor],
-        [unBtn.widthAnchor constraintEqualToConstant:140],
-        [unBtn.heightAnchor constraintEqualToConstant:34]
+        [vJit.topAnchor constraintEqualToAnchor:vFooter.topAnchor constant:10],
+        [vJit.centerXAnchor constraintEqualToAnchor:vFooter.centerXAnchor],
+        [vJit.widthAnchor constraintEqualToConstant:140],
+        [vJit.heightAnchor constraintEqualToConstant:34],
+        [vUn.topAnchor constraintEqualToAnchor:vJit.bottomAnchor constant:10],
+        [vUn.centerXAnchor constraintEqualToAnchor:vFooter.centerXAnchor],
+        [vUn.widthAnchor constraintEqualToConstant:140],
+        [vUn.heightAnchor constraintEqualToConstant:34]
     ]];
     tv.tableFooterView = footer;
 UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:detailVC]; [self presentViewController:nav animated:YES completion:nil];
