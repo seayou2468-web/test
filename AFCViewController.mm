@@ -99,7 +99,7 @@
         [self createNewFile];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Upload File" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.item"] inMode:UIDocumentPickerModeImport];
+        UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem] asCopy:YES];
         picker.delegate = self;
         [self presentViewController:picker animated:YES completion:nil];
     }]];

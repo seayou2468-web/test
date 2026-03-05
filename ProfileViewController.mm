@@ -1,4 +1,5 @@
 #import "ProfileViewController.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 @interface ProfileViewController () {
     UITableView *_tableView;
@@ -59,7 +60,7 @@
 }
 
 - (void)installTapped {
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.item"] inMode:UIDocumentPickerModeImport];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem] asCopy:YES];
     picker.delegate = self;
     [self presentViewController:picker animated:YES completion:nil];
 }
