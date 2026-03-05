@@ -42,8 +42,9 @@
     nw_parameters_t parameters;
 
     if (useSSL) {
-        nw_protocol_options_t tls_options = nw_tls_create_options();
-        parameters = nw_parameters_create_secure_tcp(tls_options, NW_PARAMETERS_DEFAULT_CONFIGURATION);
+        parameters = nw_parameters_create_secure_tcp(^(nw_protocol_options_t tls_options) {
+            // Configure TLS options here if needed
+        }, NW_PARAMETERS_DEFAULT_CONFIGURATION);
     } else {
         parameters = nw_parameters_create_secure_tcp(NW_PARAMETERS_DISABLE_PROTOCOL, NW_PARAMETERS_DEFAULT_CONFIGURATION);
     }
