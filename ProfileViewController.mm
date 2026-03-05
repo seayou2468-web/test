@@ -62,7 +62,7 @@
 }
 
 - (void)installTapped {
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem] asCopy:YES];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem, [UTType typeWithFilenameExtension:@"mobileconfig"]] asCopy:YES];
     picker.delegate = self;
     [self presentViewController:picker animated:YES completion:nil];
 }
@@ -74,9 +74,20 @@
     if (!url) return;
     NSData *data = [NSData dataWithContentsOfURL:url];
     if (data) {
-        [self.connectionManager installProfile:data completion:^(NSError *error) {
-            if (!error) [self loadProfiles];
-        }];
+        if ([url.pathExtension isEqualToString:@"mobileconfig"]) {
+            [self.connectionManager installConfigurationProfile:data completion:^(NSError *error) {
+                if (error) {
+                    NSLog(@"MCInstall error: %@", error);
+                } else {
+                    NSLog(@"MCInstall success");
+                }
+                [self loadProfiles];
+            }];
+        } else {
+            [self.connectionManager installProfile:data completion:^(NSError *error) {
+                if (!error) [self loadProfiles];
+            }];
+        }
     }
 }
 

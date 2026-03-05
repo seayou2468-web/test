@@ -1,4 +1,5 @@
 #import "DeviceConnectionManager.h"
+#import "MCInstallClient.h"
 #import "PlistUtils.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -35,6 +36,24 @@
 @property (nonatomic, strong) NSTimer *heartbeatTimer;
 @property (nonatomic, strong) NSTimer *keepAliveTimer;
 @property (nonatomic, copy) void (^syslogHandler)(NSString *);
+
+- (void)installConfigurationProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion {
+    dispatch_async(_connectionQueue, ^{
+        if (!self->_lockdown) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion([NSError errorWithDomain:@"MCInstall" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Device not connected"}]);
+            });
+            return;
+        }
+        MCInstallClient *client = [[MCInstallClient alloc] initWithLockdownClient:self->_lockdown];
+        [client installProfile:profileData completion:^(NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(error);
+            });
+        }];
+    });
+}
+
 @end
 
 @implementation DeviceConnectionManager
@@ -728,6 +747,24 @@
         struct IdeviceFfiError *err = installation_proxy_uninstall(self->_instproxy, [bundleId UTF8String], NULL);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"InstProxy" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Failed to uninstall app"}]); }); }
         else { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); }); }
+    });
+}
+
+
+- (void)installConfigurationProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion {
+    dispatch_async(_connectionQueue, ^{
+        if (!self->_lockdown) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion([NSError errorWithDomain:@"MCInstall" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Device not connected"}]);
+            });
+            return;
+        }
+        MCInstallClient *client = [[MCInstallClient alloc] initWithLockdownClient:self->_lockdown];
+        [client installProfile:profileData completion:^(NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(error);
+            });
+        }];
     });
 }
 
