@@ -189,7 +189,7 @@
     if (_misagent) { misagent_client_free(_misagent); _misagent = NULL; }
     if (_diagnostics) { diagnostics_relay_client_free(_diagnostics); _diagnostics = NULL; }
     if (_locationSimulationNew) { location_simulation_free(_locationSimulationNew); _locationSimulationNew = NULL; }
-    if (_appService) { app_service_client_free(_appService); _appService = NULL; }
+    if (_appService) { app_service_free(_appService); _appService = NULL; }
     if (_remoteServer) { remote_server_free(_remoteServer); _remoteServer = NULL; }
     if (_rsdHandshake) { rsd_handshake_free(_rsdHandshake); _rsdHandshake = NULL; }
     if (_adapter) { adapter_free(_adapter); _adapter = NULL; }
@@ -240,20 +240,20 @@
     dispatch_async(_connectionQueue, ^{
         NSMutableArray *apps = [NSMutableArray array];
         if (self->_appService) {
-            struct AppServiceAppList *list = NULL;
-            struct IdeviceFfiError *err = app_service_list_apps(self->_appService, 1, 1, 1, 1, 1, &list);
+            struct AppListEntryC *list = NULL; uintptr_t count = 0;
+            struct IdeviceFfiError *err = app_service_list_apps(self->_appService, 1, 1, 1, 1, 1, &list, &count);
             if (!err && list) {
-                for (size_t i = 0; i < list->len; i++) {
+                for (uintptr_t i = 0; i < count; i++) {
                     NSMutableDictionary *dict = [NSMutableDictionary dictionary];
-                    if (list->apps[i].bundle_id) dict[@"CFBundleIdentifier"] = [NSString stringWithUTF8String:list->apps[i].bundle_id];
-                    if (list->apps[i].display_name) dict[@"CFBundleDisplayName"] = [NSString stringWithUTF8String:list->apps[i].display_name];
+                    if (list[i].bundle_id) dict[@"CFBundleIdentifier"] = [NSString stringWithUTF8String:list[i].bundle_id];
+                    if (list[i].display_name) dict[@"CFBundleDisplayName"] = [NSString stringWithUTF8String:list[i].display_name];
                     [apps addObject:dict];
                 }
-                app_service_free_app_list(list);
+                app_service_free_app_list(list, count);
             } else if (err) idevice_error_free(err);
         } else if (self->_instproxy) {
-            plist_t result = NULL; size_t len = 0;
-            struct IdeviceFfiError *err = installation_proxy_browse(self->_instproxy, NULL, (plist_t **)&result, &len);
+            plist_t *result = NULL; size_t len = 0;
+            struct IdeviceFfiError *err = installation_proxy_browse(self->_instproxy, NULL, &result, &len);
             if (!err && result) {
                 plist_t *plistArray = (plist_t *)result;
                 for (size_t i = 0; i < len; i++) {
@@ -271,9 +271,12 @@
     dispatch_async(_connectionQueue, ^{
         NSData *data = nil;
         if (self->_appService) {
-            uint8_t *buf = NULL; size_t len = 0;
-            struct IdeviceFfiError *err = app_service_fetch_app_icon(self->_appService, [bundleId UTF8String], &buf, &len);
-            if (!err && buf) { data = [NSData dataWithBytes:buf length:len]; idevice_data_free(buf); }
+            struct IconDataC *icon_data = NULL;
+            struct IdeviceFfiError *err = app_service_fetch_app_icon(self->_appService, [bundleId UTF8String], &icon_data);
+            if (!err && icon_data) {
+                data = [NSData dataWithBytes:icon_data->data length:icon_data->len];
+                app_service_free_icon_data(icon_data);
+            }
             else if (err) idevice_error_free(err);
         }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(data ? [UIImage imageWithData:data] : nil); });
@@ -287,8 +290,8 @@
         if (self->_locationSimulationNew) {
             location_simulation_set_location(self->_locationSimulationNew, lat, lon);
         } else if (self->_provider) {
-            if (!self->_locationSimulation) location_simulation_service_connect(self->_provider, &self->_locationSimulation);
-            if (self->_locationSimulation) location_simulation_service_set_location(self->_locationSimulation, lat, lon);
+            if (!self->_locationSimulation) lockdownd_location_simulation_service_connect(self->_provider, &self->_locationSimulation);
+            if (self->_locationSimulation) lockdown_location_simulation_set_location(self->_locationSimulation, lat, lon);
         }
     });
 }
@@ -296,7 +299,7 @@
 - (void)clearSimulatedLocation {
     dispatch_async(_connectionQueue, ^{
         if (self->_locationSimulationNew) location_simulation_clear_location(self->_locationSimulationNew);
-        else if (self->_locationSimulation) location_simulation_service_clear_location(self->_locationSimulation);
+        else if (self->_locationSimulation) lockdown_location_simulation_clear_location(self->_locationSimulation);
     });
 }
 
@@ -305,21 +308,22 @@
 - (void)afcListDirectory:(NSString *)path completion:(void (^)(NSArray *items, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_afc) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"AFC" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"AFC not connected"}]); }); return; }
-        char **entries = NULL; uint32_t count = 0;
+        char **entries = NULL; size_t count = 0;
         struct IdeviceFfiError *err = afc_list_directory(self->_afc, [path UTF8String], &entries, &count);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"AFC" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"List failed"}]); }); }
         else {
             NSMutableArray *items = [NSMutableArray array];
-            for (uint32_t i = 0; i < count; i++) {
+            for (size_t i = 0; i < count; i++) {
                 if (entries[i]) {
                     NSString *name = [NSString stringWithUTF8String:entries[i]];
                     if ([name isEqualToString:@"."] || [name isEqualToString:@".."]) { plist_mem_free(entries[i]); continue; }
                     NSString *fullPath = [path stringByAppendingPathComponent:name];
-                    struct AfcFileInfo *info = NULL;
+                    struct AfcFileInfo info; memset(&info, 0, sizeof(info));
                     afc_get_file_info(self->_afc, [fullPath UTF8String], &info);
-                    BOOL isDir = NO; long long size = 0;
-                    if (info) { isDir = info->is_directory; size = info->size; afc_file_info_free(info); }
-                    [items addObject:@{@"name": name, @"isDirectory": @(isDir), @"size": @(size)}];
+                    BOOL isDir = NO;
+                    if (info.st_ifmt && strcmp(info.st_ifmt, "S_IFDIR") == 0) isDir = YES;
+                    [items addObject:@{@"name": name, @"isDirectory": @(isDir), @"size": @(info.size)}];
+                    afc_file_info_free(&info);
                     plist_mem_free(entries[i]);
                 }
             }
@@ -340,7 +344,7 @@
             afc_file_close(fh);
             if (!err) {
                 NSData *data = [NSData dataWithBytes:buf length:len];
-                afc_file_read_data_free(buf);
+                afc_file_read_data_free(buf, len);
                 dispatch_async(dispatch_get_main_queue(), ^{ completion(data, nil); });
                 return;
             }
@@ -400,19 +404,21 @@
         struct HouseArrestClientHandle *ha = NULL;
         struct IdeviceFfiError *err = house_arrest_client_connect(self->_provider, &ha);
         if (!err && ha) {
-            if (isDocuments) err = house_arrest_vend_documents(ha, [bundleId UTF8String]);
-            else err = house_arrest_vend_container(ha, [bundleId UTF8String]);
-            if (!err) {
-                char **entries = NULL; uint32_t count = 0;
-                err = afc_list_directory((struct AfcClientHandle *)ha, [path UTF8String], &entries, &count);
+            struct AfcClientHandle *afcVended = NULL;
+            if (isDocuments) err = house_arrest_vend_documents(ha, [bundleId UTF8String], &afcVended);
+            else err = house_arrest_vend_container(ha, [bundleId UTF8String], &afcVended);
+            if (!err && afcVended) {
+                char **entries = NULL; size_t count = 0;
+                err = afc_list_directory(afcVended, [path UTF8String], &entries, &count);
                 if (!err) {
                     NSMutableArray *items = [NSMutableArray array];
-                    for (uint32_t i = 0; i < count; i++) {
+                    for (size_t i = 0; i < count; i++) {
                         NSString *name = [NSString stringWithUTF8String:entries[i]];
                         if (![name isEqualToString:@"."] && ![name isEqualToString:@".."]) [items addObject:@{@"name": name, @"isDirectory": @(YES)}];
                         plist_mem_free(entries[i]);
                     }
                     plist_mem_free(entries);
+                    afc_client_free(afcVended);
                     house_arrest_client_free(ha);
                     dispatch_async(dispatch_get_main_queue(), ^{ completion(items, nil); });
                     return;
@@ -461,10 +467,10 @@
 - (void)fetchInterfaceOrientationWithCompletion:(void (^)(int orientation, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_springboard) { dispatch_async(dispatch_get_main_queue(), ^{ completion(0, [NSError errorWithDomain:@"SB" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
-        int orientation = 0;
+        uint8_t orientation = 0;
         struct IdeviceFfiError *err = springboard_services_get_interface_orientation(self->_springboard, &orientation);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion(0, [NSError errorWithDomain:@"SB" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed"}]); }); }
-        else dispatch_async(dispatch_get_main_queue(), ^{ completion(orientation, nil); });
+        else dispatch_async(dispatch_get_main_queue(), ^{ completion((int)orientation, nil); });
     });
 }
 
@@ -475,7 +481,7 @@
         struct IdeviceFfiError *err = springboard_services_get_home_screen_wallpaper_preview(self->_springboard, &buf, &len);
         if (!err && buf) {
             UIImage *img = [UIImage imageWithData:[NSData dataWithBytes:buf length:len]];
-            idevice_data_free(buf);
+            idevice_data_free(buf, len);
             dispatch_async(dispatch_get_main_queue(), ^{ completion(img, nil); });
         } else {
             if (err) idevice_error_free(err);
@@ -491,7 +497,7 @@
         struct IdeviceFfiError *err = springboard_services_get_lock_screen_wallpaper_preview(self->_springboard, &buf, &len);
         if (!err && buf) {
             UIImage *img = [UIImage imageWithData:[NSData dataWithBytes:buf length:len]];
-            idevice_data_free(buf);
+            idevice_data_free(buf, len);
             dispatch_async(dispatch_get_main_queue(), ^{ completion(img, nil); });
         } else {
             if (err) idevice_error_free(err);
@@ -514,16 +520,17 @@
 - (void)fetchProfilesWithCompletion:(void (^)(NSArray<NSData *> *profiles, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_misagent) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"Misagent" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
-        plist_t *result = NULL; size_t len = 0;
-        struct IdeviceFfiError *err = misagent_copy_all(self->_misagent, (plist_t **)&result, &len);
+        uint8_t **result = NULL; size_t *lens = NULL; size_t count = 0;
+        struct IdeviceFfiError *err = misagent_copy_all(self->_misagent, &result, &lens, &count);
         if (!err && result) {
             NSMutableArray *profiles = [NSMutableArray array];
-            plist_t *plistArray = (plist_t *)result;
-            for (size_t i = 0; i < len; i++) {
-                NSData *data = [PlistUtils objectFromPlist:plistArray[i]];
-                if (data) [profiles addObject:data];
+            for (size_t i = 0; i < count; i++) {
+                if (result[i]) {
+                    NSData *data = [NSData dataWithBytes:result[i] length:lens[i]];
+                    [profiles addObject:data];
+                }
             }
-            idevice_plist_array_free(plistArray, len);
+            misagent_free_profiles(result, lens, count);
             dispatch_async(dispatch_get_main_queue(), ^{ completion(profiles, nil); });
         } else {
             if (err) idevice_error_free(err);
@@ -555,18 +562,18 @@
 - (void)fetchProcessListWithCompletion:(void (^)(NSArray<NSDictionary *> *processes, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_appService) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"Process" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
-        struct AppServiceProcessList *list = NULL;
-        struct IdeviceFfiError *err = app_service_list_processes(self->_appService, &list);
+        struct ProcessTokenC *list = NULL; uintptr_t count = 0;
+        struct IdeviceFfiError *err = app_service_list_processes(self->_appService, &list, &count);
         if (!err && list) {
             NSMutableArray *procs = [NSMutableArray array];
-            for (size_t i = 0; i < list->len; i++) {
+            for (uintptr_t i = 0; i < count; i++) {
                 [procs addObject:@{
-                    @"pid": @(list->processes[i].pid),
-                    @"name": [NSString stringWithUTF8String:list->processes[i].name ?: ""],
-                    @"bundle_id": [NSString stringWithUTF8String:list->processes[i].bundle_id ?: ""]
+                    @"pid": @(list[i].pid),
+                    @"name": [NSString stringWithUTF8String:list[i].name ?: ""],
+                    @"bundle_id": [NSString stringWithUTF8String:list[i].bundle_id ?: ""]
                 }];
             }
-            app_service_free_process_list(list);
+            app_service_free_process_list(list, count);
             dispatch_async(dispatch_get_main_queue(), ^{ completion(procs, nil); });
         } else {
             if (err) idevice_error_free(err);
@@ -601,7 +608,7 @@
 - (void)browseAppsWithOptions:(NSDictionary *)options completion:(void (^)(NSArray *apps, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_instproxy) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"InstProxy" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Installation Proxy not connected"}]); }); return; }
-        plist_t optPlist = options ? [PlistUtils plistFromObject:options] : NULL; plist_t *result = NULL; size_t len = 0; struct IdeviceFfiError *err = installation_proxy_browse(self->_instproxy, optPlist, (plist_t **)&result, &len);
+        plist_t optPlist = options ? [PlistUtils plistFromObject:options] : NULL; plist_t *result = NULL; size_t len = 0; struct IdeviceFfiError *err = installation_proxy_browse(self->_instproxy, optPlist, &result, &len);
         if (optPlist) plist_free(optPlist);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"InstProxy" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Browse failed"}]); }); }
         else {
