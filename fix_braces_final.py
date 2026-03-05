@@ -1,4 +1,10 @@
-#import "DeviceConnectionManager.h"
+with open('DeviceConnectionManager.mm', 'r') as f:
+    content = f.read()
+
+# I messed up the braces in the dedup script.
+# I'll just rewrite with the correct template including the new method
+
+template = r'''#import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -641,3 +647,7 @@
 }
 
 @end
+'''
+
+with open('DeviceConnectionManager.mm', 'w') as f:
+    f.write(template)

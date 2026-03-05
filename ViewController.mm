@@ -14,6 +14,7 @@
 @property (nonatomic, strong) UIButton *locationButton;
 @property (nonatomic, strong) UIButton *afcButton;
 @property (nonatomic, strong) UIButton *mountButton;
+@property (nonatomic, strong) UIButton *autoMountButton;
 @property (nonatomic, strong) NSCache<NSString *, UIImage *> *iconCache;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray<NSDictionary *> *appList;
@@ -88,7 +89,7 @@
     self.locationButton.layer.cornerRadius = 10;
     [self.locationButton addTarget:self action:@selector(showLocationPicker) forControlEvents:UIControlEventTouchUpInside];
     self.locationButton.enabled = NO;
-            self.afcButton.enabled = NO; self.mountButton.enabled = NO;
+            self.afcButton.enabled = NO; self.mountButton.enabled = NO; self.autoMountButton.enabled = NO;
     self.locationButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.locationButton];
 
@@ -98,7 +99,7 @@
     [self.afcButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.afcButton.layer.cornerRadius = 10;
     [self.afcButton addTarget:self action:@selector(showAFC) forControlEvents:UIControlEventTouchUpInside];
-    self.afcButton.enabled = NO; self.mountButton.enabled = NO;
+    self.afcButton.enabled = NO; self.mountButton.enabled = NO; self.autoMountButton.enabled = NO;
     self.afcButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.afcButton];
 
@@ -108,9 +109,19 @@
     [self.mountButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.mountButton.layer.cornerRadius = 10;
     [self.mountButton addTarget:self action:@selector(mountTapped) forControlEvents:UIControlEventTouchUpInside];
-    self.mountButton.enabled = NO;
+    self.mountButton.enabled = NO; self.autoMountButton.enabled = NO;
     self.mountButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.mountButton];
+
+    self.autoMountButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.autoMountButton setTitle:"Auto-Fetch & Mount" forState:UIControlStateNormal];
+    self.autoMountButton.backgroundColor = [UIColor systemOrangeColor];
+    [self.autoMountButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.autoMountButton.layer.cornerRadius = 10;
+    [self.autoMountButton addTarget:self action:@selector(autoMountTapped) forControlEvents:UIControlEventTouchUpInside];
+    self.autoMountButton.enabled = NO;
+    self.autoMountButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.autoMountButton];
 
     [NSLayoutConstraint activateConstraints:@[
         [self.statusLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
@@ -148,10 +159,15 @@
         [self.afcButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
         [self.afcButton.heightAnchor constraintEqualToConstant:40],
 
-        [self.mountButton.bottomAnchor constraintEqualToAnchor:self.disconnectButton.topAnchor constant:-10],
+        [self.mountButton.bottomAnchor constraintEqualToAnchor:self.autoMountButton.topAnchor constant:-10],
         [self.mountButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
         [self.mountButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
         [self.mountButton.heightAnchor constraintEqualToConstant:40],
+
+        [self.autoMountButton.bottomAnchor constraintEqualToAnchor:self.disconnectButton.topAnchor constant:-10],
+        [self.autoMountButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.autoMountButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.autoMountButton.heightAnchor constraintEqualToConstant:40],
 
         [self.disconnectButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
         [self.disconnectButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
@@ -177,6 +193,20 @@
     LocationPickerViewController *picker = [[LocationPickerViewController alloc] init];
     picker.delegate = self;
     [self.navigationController pushViewController:picker animated:YES];
+}
+
+- (void)autoMountTapped {
+    [self managerDidLog:@"[DDI] Starting auto-fetch sequence..."];
+    [self managerDidUpdateStatus:@"Fetching DDI..." color:[UIColor orangeColor]];
+    [self.connectionManager autoFetchAndMountDDIWithCompletion:^(NSError *error) {
+        if (error) {
+            [self managerDidLog:[NSString stringWithFormat:@"[ERROR] Auto-mount failed: %@", error.localizedDescription]];
+            [self managerDidUpdateStatus:@"Fetch Error" color:[UIColor redColor]];
+        } else {
+            [self managerDidLog:@"[DDI] Auto-mount successful."];
+            [self managerDidUpdateStatus:@"DDI Mounted" color:[UIColor systemGreenColor]];
+        }
+    }];
 }
 
 - (void)mountTapped {
@@ -212,7 +242,7 @@
             self.connectButton.enabled = NO;
             self.disconnectButton.enabled = YES;
             self.locationButton.enabled = YES;
-            self.afcButton.enabled = YES; self.mountButton.enabled = YES;
+            self.afcButton.enabled = YES; self.mountButton.enabled = YES; self.autoMountButton.enabled = YES;
             [self.connectionManager connectWithData:data];
         });
     });
@@ -238,12 +268,12 @@
             self.connectButton.enabled = YES;
             self.disconnectButton.enabled = NO;
             self.locationButton.enabled = NO;
-            self.afcButton.enabled = NO; self.mountButton.enabled = NO;
+            self.afcButton.enabled = NO; self.mountButton.enabled = NO; self.autoMountButton.enabled = NO;
         } else if ([status isEqualToString:@"Connected"]) {
             self.connectButton.enabled = NO;
             self.disconnectButton.enabled = YES;
             self.locationButton.enabled = YES;
-            self.afcButton.enabled = YES; self.mountButton.enabled = YES;
+            self.afcButton.enabled = YES; self.mountButton.enabled = YES; self.autoMountButton.enabled = YES;
         }
     });
 }
