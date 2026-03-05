@@ -69,7 +69,6 @@ extern "C" {
 - (void)fetchProfilesWithCompletion:(void (^)(NSArray<NSData *> *profiles, NSError *error))completion;
 - (void)installProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion;
 - (void)removeProfileWithUUID:(NSString *)uuid completion:(void (^)(NSError *error))completion;
-- (void)installConfigurationProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion;
 
 // Notification Proxy
 - (void)postNotification:(NSString *)name;

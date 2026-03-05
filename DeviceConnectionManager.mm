@@ -1,5 +1,4 @@
 #import "DeviceConnectionManager.h"
-#import "MCInstallClient.h"
 #import "PlistUtils.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -101,7 +100,7 @@
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
     if (!check()) return;
-    err = idevice_tcp_provider_new((const struct sockaddr *)&addr, _pairingFile, &_provider);
+    err = idevice_tcp_provider_new((const struct sockaddr *)&addr, _pairingFile, "mdk-provider", &_provider);
     _pairingFile = NULL;
     if (err || !_provider) {
         [self log:[NSString stringWithFormat:@"[ERROR] Provider creation: %s", err ? err->message : "NULL"]];
@@ -111,12 +110,7 @@
     }
 
     if (!check()) return;
-    struct IdevicePairingFile *pf = NULL;
-    err = idevice_provider_get_pairing_file(_provider, &pf);
-    if (!err && pf) {
-        err = lockdownd_client_new(_provider, pf, &_lockdown);
-        idevice_pairing_file_free(pf);
-    }
+    err = lockdownd_connect(_provider, &_lockdown);
     if (err || !_lockdown) {
         [self log:[NSString stringWithFormat:@"[ERROR] Lockdown: %s", err ? err->message : "NULL"]];
         if (err) idevice_error_free(err);
@@ -131,10 +125,10 @@
     [self startHeartbeat];
 
     // Connect other services
-    err = springboard_services_client_connect(_provider, &_springboard);
+    err = springboard_services_connect(_provider, &_springboard);
     if (err) idevice_error_free(err);
 
-    err = installation_proxy_client_connect(_provider, &_instproxy);
+    err = installation_proxy_connect(_provider, &_instproxy);
     if (err) idevice_error_free(err);
 
     err = afc_client_connect(_provider, &_afc);
@@ -146,7 +140,7 @@
     err = notification_proxy_connect(_provider, &_notificationProxy);
     if (err) idevice_error_free(err);
 
-    err = misagent_client_connect(_provider, &_misagent);
+    err = misagent_connect(_provider, &_misagent);
     if (err) idevice_error_free(err);
 
     err = diagnostics_relay_client_connect(_provider, &_diagnostics);
@@ -156,19 +150,22 @@
     err = core_device_proxy_connect(_provider, &_coreDeviceProxy);
     if (!err && _coreDeviceProxy) {
         uint16_t rsdPort = 0;
-        err = core_device_proxy_get_rsd_port(_coreDeviceProxy, &rsdPort);
+        err = core_device_proxy_get_server_rsd_port(_coreDeviceProxy, &rsdPort);
         if (!err && rsdPort > 0) {
-            struct ReadWriteOpaque *socket = NULL;
-            err = core_device_proxy_create_tcp_adapter(_coreDeviceProxy, "10.7.0.1", rsdPort, &_adapter, &socket);
+            err = core_device_proxy_create_tcp_adapter(_coreDeviceProxy, &_adapter);
             _coreDeviceProxy = NULL; // consumed
-            if (!err && socket) {
-                err = rsd_handshake_new(socket, &_rsdHandshake);
-                if (!err && _rsdHandshake) {
-                    err = remote_server_connect_rsd(_rsdHandshake, &_remoteServer);
-                    _rsdHandshake = NULL; // consumed
-                    if (!err && _remoteServer) {
-                        location_simulation_new(_remoteServer, &_locationSimulationNew);
-                        app_service_connect_rsd(_adapter, NULL, &_appService);
+            if (!err && _adapter) {
+                struct ReadWriteOpaque *socket = NULL;
+                err = adapter_connect(_adapter, rsdPort, &socket);
+                if (!err && socket) {
+                    err = rsd_handshake_new(socket, &_rsdHandshake);
+                    if (!err && _rsdHandshake) {
+                        err = remote_server_connect_rsd(_adapter, _rsdHandshake, &_remoteServer);
+                        _rsdHandshake = NULL; // consumed
+                        if (!err && _remoteServer) {
+                            location_simulation_new(_remoteServer, &_locationSimulationNew);
+                            app_service_connect_rsd(_adapter, &_appService);
+                        }
                     }
                 }
             }
@@ -181,7 +178,7 @@
     [self stopHeartbeat];
     if (_lockdown) { lockdownd_client_free(_lockdown); _lockdown = NULL; }
     if (_heartbeat) { heartbeat_client_free(_heartbeat); _heartbeat = NULL; }
-    if (_springboard) { springboard_services_client_free(_springboard); _springboard = NULL; }
+    if (_springboard) { springboard_services_free(_springboard); _springboard = NULL; }
     if (_instproxy) { installation_proxy_client_free(_instproxy); _instproxy = NULL; }
     if (_afc) { afc_client_free(_afc); _afc = NULL; }
     if (_imageMounter) { image_mounter_free(_imageMounter); _imageMounter = NULL; }
@@ -219,12 +216,12 @@
 - (void)heartbeatTick {
     dispatch_async(_connectionQueue, ^{
         if (!self->_provider) return;
-        if (!self->_heartbeat) heartbeat_client_connect(self->_provider, &self->_heartbeat);
+        if (!self->_heartbeat) heartbeat_connect(self->_provider, &self->_heartbeat);
         if (self->_heartbeat) {
             plist_t response = NULL;
-            struct IdeviceFfiError *err = heartbeat_receive_with_timeout(self->_heartbeat, 1000, &response);
+            struct IdeviceFfiError *err = heartbeat_get_marco(self->_heartbeat, &response);
             if (response) {
-                heartbeat_send(self->_heartbeat, response);
+                heartbeat_send_polo(self->_heartbeat);
                 plist_free(response);
             } else if (err) {
                 idevice_error_free(err);
@@ -245,8 +242,8 @@
             if (!err && list) {
                 for (uintptr_t i = 0; i < count; i++) {
                     NSMutableDictionary *dict = [NSMutableDictionary dictionary];
-                    if (list[i].bundle_id) dict[@"CFBundleIdentifier"] = [NSString stringWithUTF8String:list[i].bundle_id];
-                    if (list[i].display_name) dict[@"CFBundleDisplayName"] = [NSString stringWithUTF8String:list[i].display_name];
+                    if (list[i].bundle_identifier) dict[@"CFBundleIdentifier"] = [NSString stringWithUTF8String:list[i].bundle_identifier];
+                    if (list[i].name) dict[@"CFBundleDisplayName"] = [NSString stringWithUTF8String:list[i].name];
                     [apps addObject:dict];
                 }
                 app_service_free_app_list(list, count);
@@ -272,9 +269,9 @@
         NSData *data = nil;
         if (self->_appService) {
             struct IconDataC *icon_data = NULL;
-            struct IdeviceFfiError *err = app_service_fetch_app_icon(self->_appService, [bundleId UTF8String], &icon_data);
+            struct IdeviceFfiError *err = app_service_fetch_app_icon(self->_appService, [bundleId UTF8String], 120.0, 120.0, 2.0, 1, &icon_data);
             if (!err && icon_data) {
-                data = [NSData dataWithBytes:icon_data->data length:icon_data->len];
+                data = [NSData dataWithBytes:icon_data->data length:icon_data->data_len];
                 app_service_free_icon_data(icon_data);
             }
             else if (err) idevice_error_free(err);
@@ -696,23 +693,6 @@
         struct IdeviceFfiError *err = installation_proxy_uninstall(self->_instproxy, [bundleId UTF8String], NULL);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"InstProxy" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Failed to uninstall app"}]); }); }
         else { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); }); }
-    });
-}
-
-- (void)installConfigurationProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion {
-    dispatch_async(_connectionQueue, ^{
-        if (!self->_lockdown) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion([NSError errorWithDomain:@"MCInstall" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Device not connected"}]);
-            });
-            return;
-        }
-        MCInstallClient *client = [[MCInstallClient alloc] initWithLockdownClient:self->_lockdown];
-        [client installProfile:profileData completion:^(NSError *error) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion(error);
-            });
-        }];
     });
 }
 
