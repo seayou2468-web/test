@@ -285,18 +285,18 @@
 - (void)simulateLocationWithLatitude:(double)lat longitude:(double)lon {
     dispatch_async(_connectionQueue, ^{
         if (self->_locationSimulationNew) {
-            location_simulation_set_location(self->_locationSimulationNew, lat, lon);
+            location_simulation_set(self->_locationSimulationNew, lat, lon);
         } else if (self->_provider) {
-            if (!self->_locationSimulation) lockdownd_location_simulation_service_connect(self->_provider, &self->_locationSimulation);
-            if (self->_locationSimulation) lockdown_location_simulation_set_location(self->_locationSimulation, lat, lon);
+            if (!self->_locationSimulation) lockdown_location_simulation_connect(self->_provider, &self->_locationSimulation);
+            if (self->_locationSimulation) lockdown_location_simulation_set(self->_locationSimulation, [[NSString stringWithFormat:@"%f", lat] UTF8String], [[NSString stringWithFormat:@"%f", lon] UTF8String]);
         }
     });
 }
 
 - (void)clearSimulatedLocation {
     dispatch_async(_connectionQueue, ^{
-        if (self->_locationSimulationNew) location_simulation_clear_location(self->_locationSimulationNew);
-        else if (self->_locationSimulation) lockdown_location_simulation_clear_location(self->_locationSimulation);
+        if (self->_locationSimulationNew) location_simulation_clear(self->_locationSimulationNew);
+        else if (self->_locationSimulation) lockdown_location_simulation_clear(self->_locationSimulation);
     });
 }
 
