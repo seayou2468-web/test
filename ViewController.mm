@@ -26,8 +26,6 @@
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *detailSections;
 @end
 
-static char kIsMountKey;
-
 @implementation ViewController
 
 - (void)viewDidLoad {
