@@ -1,4 +1,8 @@
-#import <objc/runtime.h>
+with open('ViewController.mm', 'r') as f:
+    lines = f.readlines()
+
+# Rewrite the file with a known good state of ViewController.mm
+template = r'''#import <objc/runtime.h>
 #import "./ViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "DeviceConnectionManager.h"
@@ -499,3 +503,7 @@
 }
 
 @end
+'''
+
+with open('ViewController.mm', 'w') as f:
+    f.write(template)
