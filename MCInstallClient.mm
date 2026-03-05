@@ -17,7 +17,7 @@
     return self;
 }
 
-- (void)installProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion {
+- (void)installProfile:(NSData *)profileData completion:(void (^)(NSError *installError))completion {
     if (!_lockdown) {
         completion([NSError errorWithDomain:@"MCInstall" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Lockdown not initialized"}]);
         return;
@@ -37,16 +37,12 @@
     [self performInstallationWithPort:port useSSL:useSSL profileData:profileData completion:completion];
 }
 
-- (void)performInstallationWithPort:(uint16_t)port useSSL:(BOOL)useSSL profileData:(NSData *)profileData completion:(void (^)(NSError *error))completion {
+- (void)performInstallationWithPort:(uint16_t)port useSSL:(BOOL)useSSL profileData:(NSData *)profileData completion:(void (^)(NSError *installError))completion {
     nw_endpoint_t endpoint = nw_endpoint_create_host("10.7.0.1", [[NSString stringWithFormat:@"%u", port] UTF8String]);
     nw_parameters_t parameters;
 
     if (useSSL) {
-        nw_tls_options_t tls_options = nw_tls_create_options();
-        // In some environments, we might need to disable peer verification for direct device connections
-        // sec_protocol_options_set_verify_block(nw_tls_copy_sec_protocol_options(tls_options), ^(sec_protocol_metadata_t metadata, sec_trust_t peer_trust, sec_protocol_verify_complete_t verify_complete) {
-        //    verify_complete(true);
-        // }, dispatch_get_main_queue());
+        nw_protocol_options_t tls_options = nw_tls_create_options();
         parameters = nw_parameters_create_secure_tcp(tls_options, NW_PARAMETERS_DEFAULT_CONFIGURATION);
     } else {
         parameters = nw_parameters_create_secure_tcp(NW_PARAMETERS_DISABLE_PROTOCOL, NW_PARAMETERS_DEFAULT_CONFIGURATION);
@@ -56,7 +52,7 @@
     nw_connection_set_queue(connection, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0));
 
     __block BOOL finished = NO;
-    nw_connection_set_state_changed_handler(connection, ^(nw_connection_state_t state, nw_error_t error) {
+    nw_connection_set_state_changed_handler(connection, ^(nw_connection_state_t state, nw_error_t stateError) {
         if (state == nw_connection_state_ready) {
             NSDictionary *cmd = @{
                 @"Command": @"InstallProfile",
@@ -69,15 +65,14 @@
             [toSend appendData:plistData];
 
             dispatch_data_t data = dispatch_data_create(toSend.bytes, toSend.length, nil, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
-            nw_connection_send(connection, data, NW_CONNECTION_CONTENT_CONTEXT_DEFAULT, true, ^(nw_error_t  _Nullable error) {
-                if (error) {
+            nw_connection_send(connection, data, NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT, true, ^(nw_error_t  _Nullable sendError) {
+                if (sendError) {
                     if (!finished) {
                         finished = YES;
                         completion([NSError errorWithDomain:@"MCInstall" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Send failed"}]);
                         nw_connection_cancel(connection);
                     }
                 } else {
-                    // Success sending, now wait for response
                     [self receiveResponse:connection completion:completion];
                 }
             });
@@ -92,10 +87,10 @@
     nw_connection_start(connection);
 }
 
-- (void)receiveResponse:(nw_connection_t)connection completion:(void (^)(NSError *error))completion {
-    nw_connection_receive(connection, 4, 4, ^(dispatch_data_t  _Nullable content, nw_content_context_t  _Nullable context, bool is_complete, nw_error_t  _Nullable error) {
-        if (error || !content) {
-            completion([NSError errorWithDomain:@"MCInstall" code:-5 userInfo:@{NSLocalizedDescriptionKey: @"Receive length failed"}]);
+- (void)receiveResponse:(nw_connection_t)connection completion:(void (^)(NSError *installError))completion {
+    nw_connection_receive(connection, 4, 4, ^(dispatch_data_t  _Nullable content, nw_content_context_t  _Nullable context, bool is_complete, nw_error_t  _Nullable receiveError) {
+        if (receiveError || !content) {
+            if (completion) completion([NSError errorWithDomain:@"MCInstall" code:-5 userInfo:@{NSLocalizedDescriptionKey: @"Receive length failed"}]);
             nw_connection_cancel(connection);
             return;
         }
@@ -104,15 +99,15 @@
         size_t size = 0;
         dispatch_data_t contiguous = dispatch_data_create_map(content, &buffer, &size);
         if (size < 4) {
-            completion([NSError errorWithDomain:@"MCInstall" code:-5 userInfo:@{NSLocalizedDescriptionKey: @"Receive length failed (small)"}]);
+            if (completion) completion([NSError errorWithDomain:@"MCInstall" code:-5 userInfo:@{NSLocalizedDescriptionKey: @"Receive length failed (small)"}]);
             nw_connection_cancel(connection);
             return;
         }
 
         uint32_t len = ntohl(*(uint32_t *)buffer);
-        nw_connection_receive(connection, len, len, ^(dispatch_data_t  _Nullable content2, nw_content_context_t  _Nullable context2, bool is_complete2, nw_error_t  _Nullable error2) {
-            if (error2 || !content2) {
-                completion([NSError errorWithDomain:@"MCInstall" code:-6 userInfo:@{NSLocalizedDescriptionKey: @"Receive body failed"}]);
+        nw_connection_receive(connection, len, len, ^(dispatch_data_t  _Nullable content2, nw_content_context_t  _Nullable context2, bool is_complete2, nw_error_t  _Nullable receiveError2) {
+            if (receiveError2 || !content2) {
+                if (completion) completion([NSError errorWithDomain:@"MCInstall" code:-6 userInfo:@{NSLocalizedDescriptionKey: @"Receive body failed"}]);
             } else {
                 const void *buffer2 = NULL;
                 size_t size2 = 0;
@@ -121,9 +116,9 @@
                 NSDictionary *resp = [NSPropertyListSerialization propertyListWithData:respData options:0 format:nil error:nil];
 
                 if ([resp[@"Status"] isEqualToString:@"Acknowledged"]) {
-                    completion(nil);
+                    if (completion) completion(nil);
                 } else {
-                    completion([NSError errorWithDomain:@"MCInstall" code:-7 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Service error: %@", resp[@"Error"] ?: @"Unknown"]}]);
+                    if (completion) completion([NSError errorWithDomain:@"MCInstall" code:-7 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Service error: %@", resp[@"Error"] ?: @"Unknown"]}]);
                 }
             }
             nw_connection_cancel(connection);
