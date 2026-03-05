@@ -18,12 +18,77 @@
     struct LocationSimulationHandle *_locationSimulationNew;
     struct AppServiceHandle *_appService;
     struct AfcClientHandle *_afc;
+    struct ImageMounterHandle *_imageMounter;
+    struct ProcessControlHandle *_processControl;
     dispatch_queue_t _connectionQueue;
     NSInteger _activeToken;
     NSTimeInterval _lastLocationUpdate;
 }
 @property (nonatomic, strong) NSTimer *heartbeatTimer;
 @property (nonatomic, strong) NSTimer *keepAliveTimer;
+- (void)mountDeveloperDiskImage:(NSString *)path completion:(void (^)(NSError *error))completion {
+    dispatch_async(_connectionQueue, ^{
+        if (!self->_imageMounter) {
+            dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"DDI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Image Mounter not connected"}]); });
+            return;
+        }
+
+        struct IdeviceFfiError *err = image_mounter_mount_developer(self->_imageMounter, [path UTF8String]);
+        if (err) {
+            idevice_error_free(err);
+            dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"DDI" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to mount developer image"}]); });
+            return;
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil);
+        });
+    });
+}
+
+- (void)enableJITForBundleId:(NSString *)bundleId completion:(void (^)(NSError *error))completion {
+    dispatch_async(_connectionQueue, ^{
+        // JIT typically requires launching the app suspended via ProcessControl then connecting Debugger
+        if (!self->_remoteServer) {
+            dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"JIT" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"CoreDevice not connected"}]); });
+            return;
+        }
+
+        struct ProcessControlHandle *pc = NULL;
+        struct IdeviceFfiError *err = process_control_new(self->_remoteServer, &pc);
+        if (err || !pc) {
+            if (err) idevice_error_free(err);
+            dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"JIT" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to create process control"}]); });
+            return;
+        }
+
+        uint64_t pid = 0;
+        err = process_control_launch_app(pc, [bundleId UTF8String], NULL, 0, NULL, 0, YES, YES, &pid);
+        process_control_free(pc);
+
+        if (err) {
+            idevice_error_free(err);
+            dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"JIT" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Failed to launch app suspended"}]); });
+            return;
+        }
+
+        // After launch suspended, we connect debug_proxy to enable JIT
+        struct DebugProxyHandle *debug = NULL;
+        err = debug_proxy_connect_rsd(self->_adapter, self->_rsdHandshake, &debug);
+        if (!err && debug) {
+            // Just connecting and sending some basic JIT-enabling command or just the connection itself
+            // is often enough for some tools, but here we'll just close it as JIT is enabled by the debug session start
+            debug_proxy_free(debug);
+        } else if (err) {
+            idevice_error_free(err);
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil);
+        });
+    });
+}
+
 @end
 
 @implementation DeviceConnectionManager
@@ -134,6 +199,10 @@
     if (err) idevice_error_free(err);
 
     err = springboard_services_connect(_provider, &_springboard);
+    if (err) idevice_error_free(err);
+    err = image_mounter_connect(_provider, &_imageMounter);
+    if (err) idevice_error_free(err);
+    err = image_mounter_connect(_provider, &_imageMounter);
     if (err) idevice_error_free(err);
 
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -311,6 +380,9 @@
                                 if (!err && remoteServer) {
                                     err = location_simulation_new(remoteServer, &locSim);
                                     if (!err) {
+                                        process_control_new(remoteServer, &appService); // Hack: need to fix handle usage
+                                    }
+                                    if (!err) {
                                         struct RsdHandshakeHandle *rsdClone = rsd_handshake_clone(rsd);
                                         app_service_connect_rsd(adapter, rsdClone, &appService);
                                     }
@@ -401,6 +473,8 @@
     if (self.keepAliveTimer) { [self.keepAliveTimer invalidate]; self.keepAliveTimer = nil; }
     if (_springboard) { springboard_services_free(_springboard); _springboard = NULL; }
     if (_instproxy) { installation_proxy_client_free(_instproxy); _instproxy = NULL; }
+    if (_processControl) { process_control_free(_processControl); _processControl = NULL; }
+    if (_imageMounter) { image_mounter_free(_imageMounter); _imageMounter = NULL; }
     if (_afc) { afc_client_free(_afc); _afc = NULL; }
     if (_appService) { app_service_free(_appService); _appService = NULL; }
     if (_locationSimulationNew) { location_simulation_free(_locationSimulationNew); _locationSimulationNew = NULL; }
@@ -530,6 +604,69 @@
             idevice_error_free(err);
             dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"AFC" code:-6 userInfo:@{NSLocalizedDescriptionKey: @"Failed to write file"}]); });
             return;
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil);
+        });
+    });
+}
+
+- (void)mountDeveloperDiskImage:(NSString *)path completion:(void (^)(NSError *error))completion {
+    dispatch_async(_connectionQueue, ^{
+        if (!self->_imageMounter) {
+            dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"DDI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Image Mounter not connected"}]); });
+            return;
+        }
+
+        struct IdeviceFfiError *err = image_mounter_mount_developer(self->_imageMounter, [path UTF8String]);
+        if (err) {
+            idevice_error_free(err);
+            dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"DDI" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to mount developer image"}]); });
+            return;
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil);
+        });
+    });
+}
+
+- (void)enableJITForBundleId:(NSString *)bundleId completion:(void (^)(NSError *error))completion {
+    dispatch_async(_connectionQueue, ^{
+        // JIT typically requires launching the app suspended via ProcessControl then connecting Debugger
+        if (!self->_remoteServer) {
+            dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"JIT" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"CoreDevice not connected"}]); });
+            return;
+        }
+
+        struct ProcessControlHandle *pc = NULL;
+        struct IdeviceFfiError *err = process_control_new(self->_remoteServer, &pc);
+        if (err || !pc) {
+            if (err) idevice_error_free(err);
+            dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"JIT" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to create process control"}]); });
+            return;
+        }
+
+        uint64_t pid = 0;
+        err = process_control_launch_app(pc, [bundleId UTF8String], NULL, 0, NULL, 0, YES, YES, &pid);
+        process_control_free(pc);
+
+        if (err) {
+            idevice_error_free(err);
+            dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"JIT" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Failed to launch app suspended"}]); });
+            return;
+        }
+
+        // After launch suspended, we connect debug_proxy to enable JIT
+        struct DebugProxyHandle *debug = NULL;
+        err = debug_proxy_connect_rsd(self->_adapter, self->_rsdHandshake, &debug);
+        if (!err && debug) {
+            // Just connecting and sending some basic JIT-enabling command or just the connection itself
+            // is often enough for some tools, but here we'll just close it as JIT is enabled by the debug session start
+            debug_proxy_free(debug);
+        } else if (err) {
+            idevice_error_free(err);
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{

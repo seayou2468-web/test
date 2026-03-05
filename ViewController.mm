@@ -13,6 +13,7 @@
 @property (nonatomic, strong) UIButton *disconnectButton;
 @property (nonatomic, strong) UIButton *locationButton;
 @property (nonatomic, strong) UIButton *afcButton;
+@property (nonatomic, strong) UIButton *mountButton;
 @property (nonatomic, strong) NSCache<NSString *, UIImage *> *iconCache;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray<NSDictionary *> *appList;
@@ -87,7 +88,7 @@
     self.locationButton.layer.cornerRadius = 10;
     [self.locationButton addTarget:self action:@selector(showLocationPicker) forControlEvents:UIControlEventTouchUpInside];
     self.locationButton.enabled = NO;
-            self.afcButton.enabled = NO;
+            self.afcButton.enabled = NO; self.mountButton.enabled = NO;
     self.locationButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.locationButton];
 
@@ -97,9 +98,19 @@
     [self.afcButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.afcButton.layer.cornerRadius = 10;
     [self.afcButton addTarget:self action:@selector(showAFC) forControlEvents:UIControlEventTouchUpInside];
-    self.afcButton.enabled = NO;
+    self.afcButton.enabled = NO; self.mountButton.enabled = NO;
     self.afcButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.afcButton];
+
+    self.mountButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.mountButton setTitle:"Mount DDI" forState:UIControlStateNormal];
+    self.mountButton.backgroundColor = [UIColor systemTealColor];
+    [self.mountButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.mountButton.layer.cornerRadius = 10;
+    [self.mountButton addTarget:self action:@selector(mountTapped) forControlEvents:UIControlEventTouchUpInside];
+    self.mountButton.enabled = NO;
+    self.mountButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.mountButton];
 
     [NSLayoutConstraint activateConstraints:@[
         [self.statusLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
@@ -132,10 +143,15 @@
         [self.locationButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
         [self.locationButton.heightAnchor constraintEqualToConstant:40],
 
-        [self.afcButton.bottomAnchor constraintEqualToAnchor:self.disconnectButton.topAnchor constant:-10],
+        [self.afcButton.bottomAnchor constraintEqualToAnchor:self.mountButton.topAnchor constant:-10],
         [self.afcButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
         [self.afcButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
         [self.afcButton.heightAnchor constraintEqualToConstant:40],
+
+        [self.mountButton.bottomAnchor constraintEqualToAnchor:self.disconnectButton.topAnchor constant:-10],
+        [self.mountButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.mountButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.mountButton.heightAnchor constraintEqualToConstant:40],
 
         [self.disconnectButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-10],
         [self.disconnectButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
@@ -161,6 +177,13 @@
     LocationPickerViewController *picker = [[LocationPickerViewController alloc] init];
     picker.delegate = self;
     [self.navigationController pushViewController:picker animated:YES];
+}
+
+- (void)mountTapped {
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem] asCopy:YES];
+    [picker setDelegate:self];
+    objc_set_associated_object(picker, "isMount", @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)showAFC {
@@ -189,7 +212,7 @@
             self.connectButton.enabled = NO;
             self.disconnectButton.enabled = YES;
             self.locationButton.enabled = YES;
-            self.afcButton.enabled = YES;
+            self.afcButton.enabled = YES; self.mountButton.enabled = YES;
             [self.connectionManager connectWithData:data];
         });
     });
@@ -215,12 +238,12 @@
             self.connectButton.enabled = YES;
             self.disconnectButton.enabled = NO;
             self.locationButton.enabled = NO;
-            self.afcButton.enabled = NO;
+            self.afcButton.enabled = NO; self.mountButton.enabled = NO;
         } else if ([status isEqualToString:@"Connected"]) {
             self.connectButton.enabled = NO;
             self.disconnectButton.enabled = YES;
             self.locationButton.enabled = YES;
-            self.afcButton.enabled = YES;
+            self.afcButton.enabled = YES; self.mountButton.enabled = YES;
         }
     });
 }
@@ -393,6 +416,15 @@
         [verLabel.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-10]
     ]];
 
+    UIButton *jitBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [jitBtn setTitle:@"Enable JIT" forState:UIControlStateNormal];
+    [jitBtn addTarget:self action:@selector(enableJITTapped) forControlEvents:UIControlEventTouchUpInside];
+    jitBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [header addSubview:jitBtn];
+    [jitBtn.topAnchor constraintEqualToAnchor:verLabel.bottomAnchor constant:10].active = YES;
+    [jitBtn.centerXAnchor constraintEqualToAnchor:header.centerXAnchor].active = YES;
+    [jitBtn.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-10].active = YES;
+
     CGSize size = [header systemLayoutSizeFittingSize:UILayoutFittingCompressedSize];
     header.frame = CGRectMake(0, 0, size.width, size.height);
     tv.tableHeaderView = header;
@@ -400,6 +432,20 @@
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:detailVC];
     detailVC.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissDetails)];
     [self presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)enableJITTapped {
+    NSString *bundleId = self.selectedAppDetails[@"CFBundleIdentifier"];
+    if (!bundleId) return;
+
+    [self managerDidLog:[NSString stringWithFormat:@"[JIT] Enabling for %@...", bundleId]];
+    [self.connectionManager enableJITForBundleId:bundleId completion:^(NSError *error) {
+        if (error) {
+            [self managerDidLog:[NSString stringWithFormat:@"[ERROR] JIT failed: %@", error.localizedDescription]];
+        } else {
+            [self managerDidLog:@"[JIT] Success."];
+        }
+    }];
 }
 
 - (void)dismissDetails {

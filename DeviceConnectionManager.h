@@ -31,5 +31,7 @@ extern "C" {
 - (void)afcListDirectory:(NSString *)path completion:(void (^)(NSArray *items, NSError *error))completion;
 - (void)afcReadFile:(NSString *)path completion:(void (^)(NSData *data, NSError *error))completion;
 - (void)afcWriteFile:(NSString *)path data:(NSData *)data completion:(void (^)(NSError *error))completion;
+- (void)mountDeveloperDiskImage:(NSString *)path completion:(void (^)(NSError *error))completion;
+- (void)enableJITForBundleId:(NSString *)bundleId completion:(void (^)(NSError *error))completion;
 
 @end
