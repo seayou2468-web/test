@@ -24,6 +24,8 @@
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *detailSections;
 @end
 
+static char kIsMountKey;
+
 @implementation ViewController
 
 - (void)viewDidLoad {
@@ -205,7 +207,7 @@
 - (void)mountTapped {
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem] asCopy:YES];
     [picker setDelegate:self];
-    objc_set_associated_object(picker, @"isMount", @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(picker, &kIsMountKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [self presentViewController:picker animated:YES completion:nil];
 }
 
@@ -229,7 +231,7 @@
     if (!url) return;
     [self managerDidLog:[NSString stringWithFormat:@"[PICKER] Selected: %@", [url lastPathComponent]]];
 
-    BOOL isMount = [objc_get_associated_object(controller, @"isMount") boolValue];
+    BOOL isMount = [objc_getAssociatedObject(controller, &kIsMountKey) boolValue];
     BOOL canAccess = [url startAccessingSecurityScopedResource];
 
     if (isMount) {
