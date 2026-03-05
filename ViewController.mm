@@ -126,7 +126,7 @@
     [self.view addSubview:self.autoMountButton];
 
     self.proxyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.proxyButton setTitle:"Notification Proxy" forState:UIControlStateNormal];
+    [self.proxyButton setTitle:@"Notification Proxy" forState:UIControlStateNormal];
     self.proxyButton.backgroundColor = [UIColor systemPinkColor];
     [self.proxyButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.proxyButton.layer.cornerRadius = 10;

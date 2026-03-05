@@ -1,4 +1,14 @@
-#import "DeviceConnectionManager.h"
+with open('DeviceConnectionManager.mm', 'r') as f:
+    content = f.read()
+
+# The error "expected ',' after method prototype" often comes from unclosed macros or weird characters.
+# I will check if any method prototype has a trailing comma instead of a semicolon in the header (if I added any).
+# But DCM.mm has no header prototypes except for those in the class extension (interface).
+
+# I'll re-verify the whole file for any stray characters.
+
+# Re-applying the template one last time, with the absolute correct argument order for NP.
+template = r'''#import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -748,3 +758,7 @@
 }
 
 @end
+'''
+
+with open('DeviceConnectionManager.mm', 'w') as f:
+    f.write(template)
