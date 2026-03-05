@@ -210,7 +210,7 @@
         NSMutableString *infoSummary = [NSMutableString stringWithString:@"[DEVICE INFO]"];
         for (NSString *key in keys) {
             plist_t val = NULL;
-            if (lockdownd_get_value(self->_lockdown, [key UTF8String], NULL, &val) == NULL && val) {
+            if (!lockdownd_get_value(self->_lockdown, [key UTF8String], NULL, &val) && val) {
                 id obj = [PlistUtils objectFromPlist:val];
                 if (obj) [infoSummary appendFormat:@"  %-16s: %@", [key UTF8String], obj];
                 plist_free(val);
@@ -252,7 +252,7 @@
         }
 
         if (self->_instproxy) {
-            void *result = NULL;
+            plist_t *result = NULL;
             size_t len = 0;
             struct IdeviceFfiError *err = installation_proxy_get_apps(self->_instproxy, NULL, NULL, 0, &result, &len);
             if (!err && result) {
@@ -519,7 +519,7 @@
         struct ProcessTokenC *list = NULL; uintptr_t count = 0; struct IdeviceFfiError *err = app_service_list_processes(self->_appService, &list, &count);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"AppService" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to list processes"}]); }); return; }
         NSMutableArray *procs = [NSMutableArray array];
-        for (uintptr_t i = 0; i < count; i++) { [procs addObject:@{@"name": list[i].name ? [NSString stringWithUTF8String:list[i].name] : @"Unknown", @"pid": @(list[i].process_identifier), @"bundleId": list[i].bundle_identifier ? [NSString stringWithUTF8String:list[i].bundle_identifier] : @"N/A"}]; }
+        for (uintptr_t i = 0; i < count; i++) { [procs addObject:@{@"name": list[i].executable_url ? [[NSString stringWithUTF8String:list[i].executable_url] lastPathComponent] : @"Unknown", @"pid": @(list[i].pid), @"bundleId": list[i].executable_url ? [NSString stringWithUTF8String:list[i].executable_url] : @"N/A"}]; }
         app_service_free_process_list(list, count); [procs sortUsingComparator:^NSComparisonResult(NSDictionary *obj1, NSDictionary *obj2) { return [obj1[@"name"] localizedCaseInsensitiveCompare:obj2[@"name"]]; }];
         dispatch_async(dispatch_get_main_queue(), ^{ completion(procs, nil); });
     });
@@ -541,7 +541,7 @@
     self.syslogHandler = handler; if (_syslogRunning) return; _syslogRunning = YES;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
         while (self->_syslogRunning && self->_syslog) {
-            char *line = NULL; struct IdeviceFfiError *err = syslog_relay_next(self->_syslog, 1000, &line);
+            char *line = NULL; struct IdeviceFfiError *err = syslog_relay_next(self->_syslog, &line);
             if (!err && line) { NSString *str = [NSString stringWithUTF8String:line]; if (self.syslogHandler) self.syslogHandler(str); notification_proxy_free_string(line); } else if (err) idevice_error_free(err);
         }
     });
@@ -554,7 +554,7 @@
 - (void)houseArrestListDirectory:(NSString *)path bundleId:(NSString *)bundleId isDocuments:(BOOL)isDocuments completion:(void (^)(NSArray *items, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_houseArrest) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"HouseArrest" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"House Arrest not connected"}]); }); return; }
-        struct IdeviceFfiError *err = isDocuments ? house_arrest_vend_documents(self->_houseArrest, [bundleId UTF8String]) : house_arrest_vend_container(self->_houseArrest, [bundleId UTF8String]);
+        struct IdeviceFfiError *err = isDocuments ? house_arrest_vend_documents(self->_houseArrest, [bundleId UTF8String], &self->_afc) : house_arrest_vend_container(self->_houseArrest, [bundleId UTF8String], &self->_afc);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"HouseArrest" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to vend container"}]); }); return; }
         [self afcListDirectory:path completion:completion];
     });
@@ -595,7 +595,7 @@
 - (void)fetchInterfaceOrientationWithCompletion:(void (^)(int orientation, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_springboard) { dispatch_async(dispatch_get_main_queue(), ^{ completion(0, [NSError errorWithDomain:@"SpringBoard" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"SpringBoard not connected"}]); }); return; }
-        int orientation = 0; struct IdeviceFfiError *err = springboard_services_get_interface_orientation(self->_springboard, &orientation);
+        uint8_t orientation = 0; struct IdeviceFfiError *err = springboard_services_get_interface_orientation(self->_springboard, &orientation);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion(0, [NSError errorWithDomain:@"SpringBoard" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to get orientation"}]); }); }
         else { dispatch_async(dispatch_get_main_queue(), ^{ completion(orientation, nil); }); }
     });
@@ -642,7 +642,7 @@
 - (void)browseAppsWithOptions:(NSDictionary *)options completion:(void (^)(NSArray *apps, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_instproxy) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"InstProxy" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Installation Proxy not connected"}]); }); return; }
-        plist_t optPlist = options ? [PlistUtils plistFromObject:options] : NULL; void *result = NULL; size_t len = 0; struct IdeviceFfiError *err = installation_proxy_browse(self->_instproxy, optPlist, &result, &len);
+        plist_t optPlist = options ? [PlistUtils plistFromObject:options] : NULL; plist_t *result = NULL; size_t len = 0; struct IdeviceFfiError *err = installation_proxy_browse(self->_instproxy, optPlist, &result, &len);
         if (optPlist) plist_free(optPlist);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"InstProxy" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Browse failed"}]); }); }
         else {

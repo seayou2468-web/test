@@ -1,5 +1,7 @@
 #import "ProfileViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 @interface ProfileViewController () <UIDocumentPickerDelegate> {
     UITableView *_tableView;

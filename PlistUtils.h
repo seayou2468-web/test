@@ -11,6 +11,7 @@ extern "C" {
 @interface PlistUtils : NSObject
 
 + (id)objectFromPlist:(plist_t)plist;
++ (plist_t)plistFromObject:(id)obj;
 + (NSString *)formattedValueForObject:(id)obj;
 
 @end

@@ -12,6 +12,9 @@
 #import "HouseArrestViewController.h"
 #import "SpringBoardViewController.h"
 
+
+static char kIsMountKey;
+
 @interface ViewController () <DeviceConnectionManagerDelegate, UIDocumentPickerDelegate, UITableViewDelegate, UITableViewDataSource, LocationPickerDelegate>
 @property (nonatomic, strong) DeviceConnectionManager *connectionManager;
 @property (nonatomic, strong) UITextView *logView;
@@ -41,29 +44,10 @@
 @property (nonatomic, strong) UIButton *springboardButton;
 
 
-- (void)enableJITTapped {
-    NSString *bundleId = self.selectedAppDetails[@"CFBundleIdentifier"];
-    if (!bundleId) return;
-    [self managerDidLog:[NSString stringWithFormat:@"[JIT] Enabling for %@...", bundleId]];
-    [self.connectionManager enableJITForBundleId:bundleId completion:^(NSError *error) {
-        if (error) [self managerDidLog:[NSString stringWithFormat:@"[ERROR] JIT failed: %@", error.localizedDescription]];
-        else [self managerDidLog:@"[JIT] Success."];
-    }];
-}
+- (void)enableJITTapped;
 
-- (void)uninstallTapped {
-    NSString *bundleId = self.selectedAppDetails[@"CFBundleIdentifier"];
-    if (!bundleId) return;
-    [self managerDidLog:[NSString stringWithFormat:@"[APPS] Uninstalling %@...", bundleId]];
-    [self.connectionManager uninstallAppWithBundleId:bundleId completion:^(NSError *error) {
-        if (error) [self managerDidLog:[NSString stringWithFormat:@"[ERROR] Uninstall failed: %@", error.localizedDescription]];
-        else { [self managerDidLog:@"[APPS] Success."]; [self dismissViewControllerAnimated:YES completion:^{ [self.connectionManager fetchAppList]; }]; }
-    }];
-}
+- (void)uninstallTapped;
 @end
-
-static char kIsMountKey;
-
 @implementation ViewController
 
 - (void)viewDidLoad {
@@ -230,7 +214,7 @@ static char kIsMountKey;
         }
         lastView = b;
     }
-    [lastView.bottomAnchor constraintEqualToAnchor:self.buttonContainer.bottomAnchor constant:-10].active = YES;
+    if (lastView) [lastView.bottomAnchor constraintEqualToAnchor:self.buttonContainer.bottomAnchor constant:-10].active = YES;
 }
 
 #pragma mark - DeviceConnectionManagerDelegate
@@ -275,7 +259,7 @@ static char kIsMountKey;
 #pragma mark - Actions
 
 - (void)selectPairingFile {
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.item"] inMode:UIDocumentPickerModeImport];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem] asCopy:YES];
     picker.delegate = self;
     [self presentViewController:picker animated:YES completion:nil];
 }
@@ -303,7 +287,7 @@ static char kIsMountKey;
 
 - (void)mountTapped {
     objc_setAssociatedObject(self, &kIsMountKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.item"] inMode:UIDocumentPickerModeImport];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem] asCopy:YES];
     picker.delegate = self;
     [self presentViewController:picker animated:YES completion:nil];
 }
@@ -417,12 +401,12 @@ static char kIsMountKey;
     UIButton *unBtn = [self createButton:@"Uninstall App" color:[UIColor systemRedColor] action:@selector(uninstallTapped)];
     [footer addSubview:jitBtn]; [footer addSubview:unBtn];
     [NSLayoutConstraint activateConstraints:@[
-        [jitBtn.topAnchor constraintEqualToAnchor:footer.topAnchor constant:10],
-        [jitBtn.centerXAnchor constraintEqualToAnchor:footer.centerXAnchor],
+        [((UIView *)jitBtn).topAnchor constraintEqualToAnchor:((UIView *)footer).topAnchor constant:10],
+        [((UIView *)jitBtn).centerXAnchor constraintEqualToAnchor:((UIView *)footer).centerXAnchor],
         [jitBtn.widthAnchor constraintEqualToConstant:140],
         [jitBtn.heightAnchor constraintEqualToConstant:34],
-        [unBtn.topAnchor constraintEqualToAnchor:jitBtn.bottomAnchor constant:10],
-        [unBtn.centerXAnchor constraintEqualToAnchor:footer.centerXAnchor],
+        [((UIView *)unBtn).topAnchor constraintEqualToAnchor:((UIView *)jitBtn).bottomAnchor constant:10],
+        [((UIView *)unBtn).centerXAnchor constraintEqualToAnchor:((UIView *)footer).centerXAnchor],
         [unBtn.widthAnchor constraintEqualToConstant:140],
         [unBtn.heightAnchor constraintEqualToConstant:34]
     ]];
@@ -452,4 +436,5 @@ UINavigationController *nav = [[UINavigationController alloc] initWithRootViewCo
         else { [self managerDidLog:@"[APPS] Success."]; [self dismissViewControllerAnimated:YES completion:^{ [self.connectionManager fetchAppList]; }]; }
     }];
 }
+
 @end

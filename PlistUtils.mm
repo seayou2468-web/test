@@ -35,4 +35,16 @@
     return [NSString stringWithFormat:@"%@", obj];
 }
 
+
++ (plist_t)plistFromObject:(id)obj {
+    if (!obj) return NULL;
+    NSError *error = nil;
+    NSData *data = [NSPropertyListSerialization dataWithPropertyList:obj format:NSPropertyListXMLFormat_v1_0 options:0 error:&error];
+    if (error || !data) return NULL;
+
+    plist_t plist = NULL;
+    if (plist_from_xml((const char *)data.bytes, (uint32_t)data.length, &plist) != PLIST_ERR_SUCCESS) return NULL;
+    return plist;
+}
+
 @end

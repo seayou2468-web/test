@@ -7,42 +7,7 @@
     UITableView *_tableView;
     NSArray *_items;
 }
-
-- (void)renameItem:(NSDictionary *)item {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename" message:item[@"name"] preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.text = item[@"name"]; }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Rename" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *newName = alert.textFields[0].text;
-        if (newName.length > 0 && ![newName isEqualToString:item[@"name"]]) {
-            NSString *oldPath = [(self.currentPath ?: @"/") stringByAppendingPathComponent:item[@"name"]];
-            NSString *newPath = [(self.currentPath ?: @"/") stringByAppendingPathComponent:newName];
-            [self.connectionManager afcRenamePath:oldPath toPath:newPath completion:^(NSError *error) {
-                if (!error) [self loadData];
-            }];
-        }
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
-    NSDictionary *item = _items[indexPath.row];
-    UIContextualAction *deleteAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"Delete" handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
-        NSString *fullPath = [(self.currentPath ?: @"/") stringByAppendingPathComponent:item[@"name"]];
-        [self.connectionManager afcDeleteFile:fullPath completion:^(NSError *error) {
-            completionHandler(error == nil);
-            if (!error) [self loadData];
-        }];
-    }];
-
-    UIContextualAction *renameAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Rename" handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
-        [self renameItem:item];
-        completionHandler(YES);
-    }];
-    renameAction.backgroundColor = [UIColor systemOrangeColor];
-
-    return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction, renameAction]];
-}
+- (void)createNewFolder;
 @end
 
 @implementation AFCViewController
@@ -99,7 +64,7 @@
         [self createNewFile];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Upload File" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.item"] inMode:UIDocumentPickerModeImport];
+        UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem] asCopy:YES];
         picker.delegate = self;
         [self presentViewController:picker animated:YES completion:nil];
     }]];
@@ -115,6 +80,22 @@
         if (name.length > 0) {
             NSString *fullPath = [(self.currentPath ?: @"/") stringByAppendingPathComponent:name];
             [self.connectionManager afcWriteFile:fullPath data:[NSData data] completion:^(NSError *error) {
+                if (!error) [self loadData];
+            }];
+        }
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)createNewFolder {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"New Folder" message:@"Enter folder name" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.placeholder = @"New Folder"; }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Create" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        NSString *name = alert.textFields[0].text;
+        if (name.length > 0) {
+            NSString *fullPath = [(self.currentPath ?: @"/") stringByAppendingPathComponent:name];
+            [self.connectionManager afcMakeDirectory:fullPath completion:^(NSError *error) {
                 if (!error) [self loadData];
             }];
         }
@@ -189,7 +170,6 @@
     }
 }
 
-
 - (void)renameItem:(NSDictionary *)item {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename" message:item[@"name"] preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.text = item[@"name"]; }];
@@ -225,4 +205,5 @@
 
     return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction, renameAction]];
 }
+
 @end
