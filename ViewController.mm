@@ -1,5 +1,5 @@
 #import <objc/runtime.h>
-#import "./ViewController.h"
+#import "ViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
@@ -11,7 +11,6 @@
 #import "ProcessViewController.h"
 #import "HouseArrestViewController.h"
 #import "SpringBoardViewController.h"
-
 
 static char kIsMountKey;
 
@@ -26,7 +25,6 @@ static char kIsMountKey;
 @property (nonatomic, strong) NSDictionary *selectedAppDetails;
 @property (nonatomic, strong) NSArray<NSArray<NSString *> *> *detailSections;
 
-// Dashboard Buttons
 @property (nonatomic, strong) UIScrollView *buttonScrollView;
 @property (nonatomic, strong) UIView *buttonContainer;
 @property (nonatomic, strong) UIButton *connectButton;
@@ -43,11 +41,10 @@ static char kIsMountKey;
 @property (nonatomic, strong) UIButton *restartButton;
 @property (nonatomic, strong) UIButton *springboardButton;
 
-
 - (void)enableJITTapped;
-
 - (void)uninstallTapped;
 @end
+
 @implementation ViewController
 
 - (void)viewDidLoad {
@@ -155,39 +152,46 @@ static char kIsMountKey;
 }
 
 - (void)setupConstraints {
+    UIView *vStatus = (UIView *)self.statusLabel;
+    UIView *vSegment = (UIView *)self.segmentedControl;
+    UIView *vLog = (UIView *)self.logView;
+    UIView *vTable = (UIView *)self.tableView;
+    UIView *vScroll = (UIView *)self.buttonScrollView;
+    UIView *vCont = (UIView *)self.buttonContainer;
+    UIView *vView = (UIView *)self.view;
+
     [NSLayoutConstraint activateConstraints:@[
-        [self.statusLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
-        [self.statusLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [self.statusLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
-        [self.statusLabel.heightAnchor constraintEqualToConstant:40],
+        [vStatus.topAnchor constraintEqualToAnchor:vView.safeAreaLayoutGuide.topAnchor constant:10],
+        [vStatus.leadingAnchor constraintEqualToAnchor:vView.leadingAnchor constant:20],
+        [vStatus.trailingAnchor constraintEqualToAnchor:vView.trailingAnchor constant:-20],
+        [vStatus.heightAnchor constraintEqualToConstant:40],
 
-        [self.segmentedControl.topAnchor constraintEqualToAnchor:self.statusLabel.bottomAnchor constant:10],
-        [self.segmentedControl.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [self.segmentedControl.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [vSegment.topAnchor constraintEqualToAnchor:vStatus.bottomAnchor constant:10],
+        [vSegment.leadingAnchor constraintEqualToAnchor:vView.leadingAnchor constant:20],
+        [vSegment.trailingAnchor constraintEqualToAnchor:vView.trailingAnchor constant:-20],
 
-        [self.logView.topAnchor constraintEqualToAnchor:self.segmentedControl.bottomAnchor constant:10],
-        [self.logView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [self.logView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
-        [self.logView.bottomAnchor constraintEqualToAnchor:self.buttonScrollView.topAnchor constant:-10],
+        [vLog.topAnchor constraintEqualToAnchor:vSegment.bottomAnchor constant:10],
+        [vLog.leadingAnchor constraintEqualToAnchor:vView.leadingAnchor constant:20],
+        [vLog.trailingAnchor constraintEqualToAnchor:vView.trailingAnchor constant:-20],
+        [vLog.bottomAnchor constraintEqualToAnchor:vScroll.topAnchor constant:-10],
 
-        [self.tableView.topAnchor constraintEqualToAnchor:self.logView.topAnchor],
-        [self.tableView.leadingAnchor constraintEqualToAnchor:self.logView.leadingAnchor],
-        [self.tableView.trailingAnchor constraintEqualToAnchor:self.logView.trailingAnchor],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:self.logView.bottomAnchor],
+        [vTable.topAnchor constraintEqualToAnchor:vLog.topAnchor],
+        [vTable.leadingAnchor constraintEqualToAnchor:vLog.leadingAnchor],
+        [vTable.trailingAnchor constraintEqualToAnchor:vLog.trailingAnchor],
+        [vTable.bottomAnchor constraintEqualToAnchor:vLog.bottomAnchor],
 
-        [self.buttonScrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.buttonScrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.buttonScrollView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor],
-        [self.buttonScrollView.heightAnchor constraintEqualToConstant:240],
+        [vScroll.leadingAnchor constraintEqualToAnchor:vView.leadingAnchor],
+        [vScroll.trailingAnchor constraintEqualToAnchor:vView.trailingAnchor],
+        [vScroll.bottomAnchor constraintEqualToAnchor:vView.safeAreaLayoutGuide.bottomAnchor],
+        [vScroll.heightAnchor constraintEqualToConstant:240],
 
-        [self.buttonContainer.topAnchor constraintEqualToAnchor:self.buttonScrollView.topAnchor],
-        [self.buttonContainer.leadingAnchor constraintEqualToAnchor:self.buttonScrollView.leadingAnchor],
-        [self.buttonContainer.trailingAnchor constraintEqualToAnchor:self.buttonScrollView.trailingAnchor],
-        [self.buttonContainer.bottomAnchor constraintEqualToAnchor:self.buttonScrollView.bottomAnchor],
-        [self.buttonContainer.widthAnchor constraintEqualToAnchor:self.buttonScrollView.widthAnchor]
+        [vCont.topAnchor constraintEqualToAnchor:vScroll.topAnchor],
+        [vCont.leadingAnchor constraintEqualToAnchor:vScroll.leadingAnchor],
+        [vCont.trailingAnchor constraintEqualToAnchor:vScroll.trailingAnchor],
+        [vCont.bottomAnchor constraintEqualToAnchor:vScroll.bottomAnchor],
+        [vCont.widthAnchor constraintEqualToAnchor:vScroll.widthAnchor]
     ]];
 
-    // Layout buttons in grid (2 per row)
     NSArray *btns = @[
         self.connectButton, self.disconnectButton,
         self.locationButton, self.afcButton,
@@ -198,23 +202,27 @@ static char kIsMountKey;
         self.springboardButton
     ];
 
-    UIView *lastView = nil;
+    UIView *lastV = nil;
     for (int i = 0; i < btns.count; i++) {
-        UIButton *b = btns[i];
-        [b.heightAnchor constraintEqualToConstant:40].active = YES;
+        UIView *vB = (UIView *)btns[i];
+        [vB.heightAnchor constraintEqualToConstant:40].active = YES;
         if (i % 2 == 0) { // Left column
-            [b.leadingAnchor constraintEqualToAnchor:self.buttonContainer.leadingAnchor constant:20].active = YES;
-            [b.trailingAnchor constraintEqualToAnchor:self.buttonContainer.centerXAnchor constant:-5].active = YES;
-            if (i == 0) [b.topAnchor constraintEqualToAnchor:self.buttonContainer.topAnchor constant:10].active = YES;
-            else [b.topAnchor constraintEqualToAnchor:btns[i-2].bottomAnchor constant:10].active = YES;
+            [vB.leadingAnchor constraintEqualToAnchor:vCont.leadingAnchor constant:20].active = YES;
+            [vB.trailingAnchor constraintEqualToAnchor:vCont.centerXAnchor constant:-5].active = YES;
+            if (i == 0) [vB.topAnchor constraintEqualToAnchor:vCont.topAnchor constant:10].active = YES;
+            else {
+                UIView *vPrevRow = (UIView *)btns[i-2];
+                [vB.topAnchor constraintEqualToAnchor:vPrevRow.bottomAnchor constant:10].active = YES;
+            }
         } else { // Right column
-            [b.leadingAnchor constraintEqualToAnchor:self.buttonContainer.centerXAnchor constant:5].active = YES;
-            [b.trailingAnchor constraintEqualToAnchor:self.buttonContainer.trailingAnchor constant:-20].active = YES;
-            [b.topAnchor constraintEqualToAnchor:btns[i-1].topAnchor].active = YES;
+            UIView *vPrevCol = (UIView *)btns[i-1];
+            [vB.leadingAnchor constraintEqualToAnchor:vCont.centerXAnchor constant:5].active = YES;
+            [vB.trailingAnchor constraintEqualToAnchor:vCont.trailingAnchor constant:-20].active = YES;
+            [vB.topAnchor constraintEqualToAnchor:vPrevCol.topAnchor].active = YES;
         }
-        lastView = b;
+        lastV = vB;
     }
-    if (lastView) [lastView.bottomAnchor constraintEqualToAnchor:self.buttonContainer.bottomAnchor constant:-10].active = YES;
+    if (lastV) [lastV.bottomAnchor constraintEqualToAnchor:vCont.bottomAnchor constant:-10].active = YES;
 }
 
 #pragma mark - DeviceConnectionManagerDelegate
@@ -414,11 +422,10 @@ static char kIsMountKey;
         [vUn.heightAnchor constraintEqualToConstant:34]
     ]];
     tv.tableFooterView = footer;
-UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:detailVC]; [self presentViewController:nav animated:YES completion:nil];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:detailVC]; [self presentViewController:nav animated:YES completion:nil];
 }
 
 - (void)dismissDetails { [self dismissViewControllerAnimated:YES completion:nil]; }
-
 
 - (void)enableJITTapped {
     NSString *bundleId = self.selectedAppDetails[@"CFBundleIdentifier"];
