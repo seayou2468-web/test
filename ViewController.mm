@@ -494,7 +494,17 @@ static char kIsMountKey;
     [header addSubview:jitBtn];
     [jitBtn.topAnchor constraintEqualToAnchor:verLabel.bottomAnchor constant:10].active = YES;
     [jitBtn.centerXAnchor constraintEqualToAnchor:header.centerXAnchor].active = YES;
-    [jitBtn.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-10].active = YES;
+    [jitBtn.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-50].active = YES;
+
+    UIButton *unBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [unBtn setTitle:@"Uninstall App" forState:UIControlStateNormal];
+    [unBtn setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
+    [unBtn addTarget:self action:@selector(uninstallTapped) forControlEvents:UIControlEventTouchUpInside];
+    unBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [header addSubview:unBtn];
+    [unBtn.topAnchor constraintEqualToAnchor:jitBtn.bottomAnchor constant:10].active = YES;
+    [unBtn.centerXAnchor constraintEqualToAnchor:header.centerXAnchor].active = YES;
+    [unBtn.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-10].active = YES;
 
     CGSize size = [header systemLayoutSizeFittingSize:UILayoutFittingCompressedSize];
     header.frame = CGRectMake(0, 0, size.width, size.height);
@@ -503,6 +513,23 @@ static char kIsMountKey;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:detailVC];
     detailVC.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissDetails)];
     [self presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)uninstallTapped {
+    NSString *bundleId = self.selectedAppDetails[@"CFBundleIdentifier"];
+    if (!bundleId) return;
+
+    [self managerDidLog:[NSString stringWithFormat:@"[APPS] Uninstalling %@...", bundleId]];
+    [self.connectionManager uninstallAppWithBundleId:bundleId completion:^(NSError *error) {
+        if (error) {
+            [self managerDidLog:[NSString stringWithFormat:@"[ERROR] Uninstall failed: %@", error.localizedDescription]];
+        } else {
+            [self managerDidLog:@"[APPS] Success."];
+            [self dismissViewControllerAnimated:YES completion:^{
+                [self.connectionManager fetchAppList];
+            }];
+        }
+    }];
 }
 
 - (void)enableJITTapped {

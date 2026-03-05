@@ -33,6 +33,8 @@ extern "C" {
 - (void)afcWriteFile:(NSString *)path data:(NSData *)data completion:(void (^)(NSError *error))completion;
 - (void)mountDeveloperDiskImage:(NSString *)path completion:(void (^)(NSError *error))completion;
 - (void)autoFetchAndMountDDIWithCompletion:(void (^)(NSError *error))completion;
+- (void)installAppAtDevicePath:(NSString *)path completion:(void (^)(NSError *error))completion;
+- (void)uninstallAppWithBundleId:(NSString *)bundleId completion:(void (^)(NSError *error))completion;
 - (void)postNotification:(NSString *)name;
 - (void)observeNotification:(NSString *)name;
 - (void)enableJITForBundleId:(NSString *)bundleId completion:(void (^)(NSError *error))completion;
