@@ -186,13 +186,14 @@
     if (_misagent) { misagent_client_free(_misagent); _misagent = NULL; }
     if (_diagnostics) { diagnostics_relay_client_free(_diagnostics); _diagnostics = NULL; }
     if (_locationSimulationNew) { location_simulation_free(_locationSimulationNew); _locationSimulationNew = NULL; }
-    if (_appService) { app_service_free(_appService); _appService = NULL; }
+    if (_appService) { app_service_client_free(_appService); _appService = NULL; }
     if (_remoteServer) { remote_server_free(_remoteServer); _remoteServer = NULL; }
     if (_rsdHandshake) { rsd_handshake_free(_rsdHandshake); _rsdHandshake = NULL; }
     if (_adapter) { adapter_free(_adapter); _adapter = NULL; }
     if (_coreDeviceProxy) { core_device_proxy_free(_coreDeviceProxy); _coreDeviceProxy = NULL; }
     if (_provider) { idevice_provider_free(_provider); _provider = NULL; }
     if (_pairingFile) { idevice_pairing_file_free(_pairingFile); _pairingFile = NULL; }
+    if (_locationSimulation) { lockdown_location_simulation_free(_locationSimulation); _locationSimulation = NULL; }
 
     [self updateStatus:@"Disconnected" color:[UIColor systemRedColor]];
 }
@@ -341,7 +342,7 @@
             afc_file_close(fh);
             if (!err) {
                 NSData *data = [NSData dataWithBytes:buf length:len];
-                afc_file_read_data_free(buf, len);
+                afc_file_read_data_free(buf, (size_t)len);
                 dispatch_async(dispatch_get_main_queue(), ^{ completion(data, nil); });
                 return;
             }
@@ -478,7 +479,7 @@
         struct IdeviceFfiError *err = springboard_services_get_home_screen_wallpaper_preview(self->_springboard, &buf, &len);
         if (!err && buf) {
             UIImage *img = [UIImage imageWithData:[NSData dataWithBytes:buf length:len]];
-            idevice_data_free(buf, len);
+            idevice_data_free(buf, (uintptr_t)len);
             dispatch_async(dispatch_get_main_queue(), ^{ completion(img, nil); });
         } else {
             if (err) idevice_error_free(err);
@@ -494,7 +495,7 @@
         struct IdeviceFfiError *err = springboard_services_get_lock_screen_wallpaper_preview(self->_springboard, &buf, &len);
         if (!err && buf) {
             UIImage *img = [UIImage imageWithData:[NSData dataWithBytes:buf length:len]];
-            idevice_data_free(buf, len);
+            idevice_data_free(buf, (uintptr_t)len);
             dispatch_async(dispatch_get_main_queue(), ^{ completion(img, nil); });
         } else {
             if (err) idevice_error_free(err);
@@ -566,8 +567,8 @@
             for (uintptr_t i = 0; i < count; i++) {
                 [procs addObject:@{
                     @"pid": @(list[i].pid),
-                    @"name": [NSString stringWithUTF8String:list[i].name ?: ""],
-                    @"bundle_id": [NSString stringWithUTF8String:list[i].bundle_id ?: ""]
+                    @"name": [NSString stringWithUTF8String:list[i].executable_url ?: ""],
+                    @"bundle_id": [NSString stringWithUTF8String:list[i].executable_url ?: ""]
                 }];
             }
             app_service_free_process_list(list, count);
