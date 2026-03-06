@@ -65,7 +65,17 @@ extern "C" {
 - (void)autoFetchAndMountDDIWithCompletion:(void (^)(NSError *error))completion;
 - (void)enableJITForBundleId:(NSString *)bundleId completion:(void (^)(NSError *error))completion;
 
-// Provisioning Profiles
+// Provisioning Profiles (Misagent)
+- (void)fetchProvisioningProfilesWithCompletion:(void (^)(NSArray<NSData *> *profiles, NSError *error))completion;
+- (void)installProvisioningProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion;
+- (void)removeProvisioningProfileWithUUID:(NSString *)uuid completion:(void (^)(NSError *error))completion;
+
+// Configuration Profiles (MCInstaller)
+- (void)fetchConfigurationProfilesWithCompletion:(void (^)(NSDictionary *profileList, NSError *error))completion;
+- (void)installConfigurationProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion;
+- (void)removeConfigurationProfileWithIdentifier:(NSString *)identifier completion:(void (^)(NSError *error))completion;
+
+// Legacy / Compatibility aliases if needed
 - (void)fetchProfilesWithCompletion:(void (^)(NSArray<NSData *> *profiles, NSError *error))completion;
 - (void)installProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion;
 - (void)removeProfileWithUUID:(NSString *)uuid completion:(void (^)(NSError *error))completion;

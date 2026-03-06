@@ -1,4 +1,6 @@
-#import "DeviceConnectionManager.h"
+import sys
+
+dcm_content = r"""#import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -874,7 +876,7 @@
         [self ensureServiceConnected:@"AppService"];
         if (self->_appService) { struct IdeviceFfiError *err = app_service_uninstall_app(self->_appService, [bundleId UTF8String]); if (!err) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); }); return; } else idevice_error_free(err); }
         [self ensureServiceConnected:@"InstProxy"];
-        if (!self->_instproxy) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"InstProxy" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Installation Proxy not connected"}]); }); return; }
+        if (!self->_instproxy) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError error_with_domain:@"InstProxy" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Installation Proxy not connected"}]); }); return; }
         struct IdeviceFfiError *err = installation_proxy_uninstall(self->_instproxy, [bundleId UTF8String], NULL);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"InstProxy" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Failed to uninstall app"}]); }); }
         else { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); }); }
@@ -882,3 +884,7 @@
 }
 
 @end
+"""
+
+with open('DeviceConnectionManager.mm', 'w') as f:
+    f.write(dcm_content)

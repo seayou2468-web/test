@@ -1,4 +1,6 @@
-#import "ProfileViewController.h"
+import sys
+
+content = r"""#import "ProfileViewController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 @interface ProfileViewController () <UIDocumentPickerDelegate, UISearchBarDelegate, UITableViewDelegate, UITableViewDataSource> {
@@ -267,3 +269,7 @@
 }
 
 @end
+"""
+
+with open('ProfileViewController.mm', 'w') as f:
+    f.write(content)
