@@ -1,4 +1,6 @@
-#import "DeviceConnectionManager.h"
+import sys
+
+content = r"""#import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -129,6 +131,9 @@
     [self log:@"[CONN] Connected to lockdown."];
 
     [self startHeartbeat];
+
+    // Establishing Infrastructure immediately but discovery lazily
+    // We removed pre-heating [self ensureServiceConnected:@"AppService"] to avoid connection storms
 
     plist_t val = NULL;
     err = lockdownd_get_value(_lockdown, "ProductVersion", NULL, &val);
@@ -892,3 +897,7 @@
 }
 
 @end
+"""
+
+with open('DeviceConnectionManager.mm', 'w') as f:
+    f.write(content)
