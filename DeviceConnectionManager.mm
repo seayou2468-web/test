@@ -710,7 +710,7 @@
         lockdownd_get_value(self->_lockdown, "ProductVersion", NULL, &versionPlist);
         uint64_t ecid = 0; NSString *version = @"";
         if (chipIdPlist) {
-             if (plist_get_uint_val(chipIdPlist, &ecid) != 0) {
+             plist_get_uint_val(chipIdPlist, &ecid); if (ecid == 0) {
                  char *s = NULL; plist_get_string_val(chipIdPlist, &s);
                  if (s) { ecid = (uint64_t)atoll(s); plist_mem_free(s); }
              }
