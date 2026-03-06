@@ -33,7 +33,6 @@
     BOOL _syslogRunning;
 }
 @property (nonatomic, strong) NSTimer *heartbeatTimer;
-@property (nonatomic, strong) NSTimer *keepAliveTimer;
 @property (nonatomic, copy) void (^syslogHandler)(NSString *);
 
 @end
@@ -100,14 +99,14 @@
     inet_pton(AF_INET, "10.7.0.1", &addr.sin_addr);
 
     if (!check()) return;
-    err = idevice_tcp_provider_new((const struct sockaddr *)&addr, _pairingFile, "mdk-provider", &_provider);
-    _pairingFile = NULL; // Consumed
+    err = idevice_tcp_provider_new((const struct sockaddr *)&addr, _pairingFile, "mdk-dashboard", &_provider);
     if (err || !_provider) {
         [self log:[NSString stringWithFormat:@"[ERROR] Provider creation: %s", err ? err->message : "NULL"]];
         if (err) idevice_error_free(err);
         [self cleanupInternal];
         return;
     }
+    _pairingFile = NULL;
 
     if (!check()) return;
     err = lockdownd_connect(_provider, &_lockdown);
@@ -121,72 +120,71 @@
     [self updateStatus:@"Connected" color:[UIColor systemGreenColor]];
     [self log:@"[CONN] Connected to lockdown."];
 
-    // Start background services
     [self startHeartbeat];
 
-    // Connect other services
-    err = springboard_services_connect(_provider, &_springboard);
-    if (err) { [self log:[NSString stringWithFormat:@"[WARN] SB: %s", err->message]]; idevice_error_free(err); }
+    plist_t val = NULL;
+    err = lockdownd_get_value(_lockdown, "ProductVersion", NULL, &val);
+    if (!err && val) {
+        char *v = NULL;
+        plist_get_string_val(val, &v);
+        if (v) { [self log:[NSString stringWithFormat:@"[CONN] Device Version: %s", v]]; plist_mem_free(v); }
+        plist_free(val);
+    } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] GetVersion: %s", err->message]]; idevice_error_free(err); }
+}
 
-    err = installation_proxy_connect(_provider, &_instproxy);
-    if (err) { [self log:[NSString stringWithFormat:@"[WARN] InstProxy: %s", err->message]]; idevice_error_free(err); }
+- (void)ensureServiceConnected:(NSString *)name {
+    struct IdeviceFfiError *err = NULL;
+    if ([name isEqualToString:@"SB"] && !_springboard) {
+        err = springboard_services_connect(_provider, &_springboard);
+    } else if ([name isEqualToString:@"InstProxy"] && !_instproxy) {
+        err = installation_proxy_connect(_provider, &_instproxy);
+    } else if ([name isEqualToString:@"AFC"] && !_afc) {
+        err = afc_client_connect(_provider, &_afc);
+    } else if ([name isEqualToString:@"Mounter"] && !_imageMounter) {
+        err = image_mounter_connect(_provider, &_imageMounter);
+    } else if ([name isEqualToString:@"NP"] && !_notificationProxy) {
+        err = notification_proxy_connect(_provider, &_notificationProxy);
+    } else if ([name isEqualToString:@"Misagent"] && !_misagent) {
+        err = misagent_connect(_provider, &_misagent);
+    } else if ([name isEqualToString:@"Diag"] && !_diagnostics) {
+        err = diagnostics_relay_client_connect(_provider, &_diagnostics);
+    } else if ([name isEqualToString:@"Modern"] && !_appService) {
+        err = core_device_proxy_connect(_provider, &_coreDeviceProxy);
+        if (!err && _coreDeviceProxy) {
+            uint16_t rsdPort = 0;
+            err = core_device_proxy_get_server_rsd_port(_coreDeviceProxy, &rsdPort);
+            if (!err && rsdPort > 0) {
+                err = core_device_proxy_create_tcp_adapter(_coreDeviceProxy, &_adapter);
+                if (!err && _adapter) {
+                    struct ReadWriteOpaque *socketRS = NULL;
+                    err = adapter_connect(_adapter, rsdPort, &socketRS);
+                    if (!err && socketRS) {
+                        struct RsdHandshakeHandle *hsRS = NULL;
+                        err = rsd_handshake_new(socketRS, &hsRS);
+                        if (!err && hsRS) {
+                            err = remote_server_connect_rsd(_adapter, hsRS, &_remoteServer);
+                            if (!err && _remoteServer) location_simulation_new(_remoteServer, &_locationSimulationNew);
+                        }
+                    }
+                    struct ReadWriteOpaque *socketAS = NULL;
+                    err = adapter_connect(_adapter, rsdPort, &socketAS);
+                    if (!err && socketAS) {
+                        struct RsdHandshakeHandle *hsAS = NULL;
+                        err = rsd_handshake_new(socketAS, &hsAS);
+                        if (!err && hsAS) app_service_connect_rsd(_adapter, hsAS, &_appService);
+                    }
+                }
+            }
+            if (err) { core_device_proxy_free(_coreDeviceProxy); _coreDeviceProxy = NULL; }
+        }
+    } else if ([name isEqualToString:@"LegacyLocation"] && !_locationSimulation) {
+        err = lockdown_location_simulation_connect(_provider, &_locationSimulation);
+    }
 
-    err = afc_client_connect(_provider, &_afc);
-    if (err) { [self log:[NSString stringWithFormat:@"[WARN] AFC: %s", err->message]]; idevice_error_free(err); }
-
-    err = image_mounter_connect(_provider, &_imageMounter);
-    if (err) { [self log:[NSString stringWithFormat:@"[WARN] Mounter: %s", err->message]]; idevice_error_free(err); }
-
-    err = notification_proxy_connect(_provider, &_notificationProxy);
-    if (err) { [self log:[NSString stringWithFormat:@"[WARN] NP: %s", err->message]]; idevice_error_free(err); }
-
-    err = misagent_connect(_provider, &_misagent);
-    if (err) { [self log:[NSString stringWithFormat:@"[WARN] Misagent: %s", err->message]]; idevice_error_free(err); }
-
-    err = diagnostics_relay_client_connect(_provider, &_diagnostics);
-    if (err) { [self log:[NSString stringWithFormat:@"[WARN] Diag: %s", err->message]]; idevice_error_free(err); }
-
-    // Modern services (iOS 17+)
-    [NSThread sleepForTimeInterval:0.5];
-    err = core_device_proxy_connect(_provider, &_coreDeviceProxy);
-    if (!err && _coreDeviceProxy) {
-        uint16_t rsdPort = 0;
-        err = core_device_proxy_get_server_rsd_port(_coreDeviceProxy, &rsdPort);
-        if (!err && rsdPort > 0) {
-            err = core_device_proxy_create_tcp_adapter(_coreDeviceProxy, &_adapter);
-            _coreDeviceProxy = NULL; // Consumed
-            if (!err && _adapter) {
-                // Connect Remote Server
-                struct ReadWriteOpaque *socketRS = NULL;
-                err = adapter_connect(_adapter, rsdPort, &socketRS);
-                if (!err && socketRS) {
-                    struct RsdHandshakeHandle *handshakeRS = NULL;
-                    err = rsd_handshake_new(socketRS, &handshakeRS);
-                    if (!err && handshakeRS) {
-                        err = remote_server_connect_rsd(_adapter, handshakeRS, &_remoteServer);
-                        if (!err && _remoteServer) {
-                            [self log:@"[CONN] Connected to RemoteServer."];
-                            location_simulation_new(_remoteServer, &_locationSimulationNew);
-                        } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] RemoteServer: %s", err->message]]; idevice_error_free(err); }
-                    } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] HandshakeRS: %s", err->message]]; idevice_error_free(err); }
-                } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] SocketRS: %s", err->message]]; idevice_error_free(err); }
-
-                // Connect App Service
-                struct ReadWriteOpaque *socketAS = NULL;
-                err = adapter_connect(_adapter, rsdPort, &socketAS);
-                if (!err && socketAS) {
-                    struct RsdHandshakeHandle *handshakeAS = NULL;
-                    err = rsd_handshake_new(socketAS, &handshakeAS);
-                    if (!err && handshakeAS) {
-                        err = app_service_connect_rsd(_adapter, handshakeAS, &_appService);
-                        if (!err && _appService) {
-                             [self log:@"[CONN] Connected to AppService."];
-                        } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] AppService: %s", err->message]]; idevice_error_free(err); }
-                    } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] HandshakeAS: %s", err->message]]; idevice_error_free(err); }
-                } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] SocketAS: %s", err->message]]; idevice_error_free(err); }
-            } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] Adapter: %s", err->message]]; idevice_error_free(err); }
-        } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] RSD Port: %s", err->message]]; idevice_error_free(err); }
-    } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] CoreDeviceProxy: %s", err->message]]; idevice_error_free(err); }
+    if (err) {
+        [self log:[NSString stringWithFormat:@"[WARN] Service %@ connect failed: %s", name, err->message]];
+        idevice_error_free(err);
+    }
 }
 
 - (void)cleanupInternal {
@@ -235,7 +233,7 @@
         if (!self->_heartbeat) heartbeat_connect(self->_provider, &self->_heartbeat);
         if (self->_heartbeat) {
             uint64_t next_interval = 0;
-            struct IdeviceFfiError *err = heartbeat_get_marco(self->_heartbeat, 10000, &next_interval);
+            struct IdeviceFfiError *err = heartbeat_get_marco(self->_heartbeat, 1000, &next_interval);
             if (!err) {
                 heartbeat_send_polo(self->_heartbeat);
             } else {
@@ -251,6 +249,8 @@
 - (void)fetchAppList {
     NSInteger token = _activeToken;
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Modern"];
+        [self ensureServiceConnected:@"InstProxy"];
         NSMutableArray *apps = [NSMutableArray array];
         BOOL success = NO;
         if (self->_appService) {
@@ -287,6 +287,7 @@
 - (void)fetchIconForBundleId:(NSString *)bundleId completion:(void (^)(UIImage *))completion {
     dispatch_async(_connectionQueue, ^{
         NSData *data = nil;
+        [self ensureServiceConnected:@"Modern"];
         if (self->_appService) {
             struct IconDataC *icon_data = NULL;
             struct IdeviceFfiError *err = app_service_fetch_app_icon(self->_appService, [bundleId UTF8String], 120.0f, 120.0f, 2.0f, 1, &icon_data);
@@ -296,13 +297,16 @@
             } else if (err) idevice_error_free(err);
         }
 
-        if (!data && self->_springboard) {
-            void *buf = NULL; size_t len = 0;
-            struct IdeviceFfiError *err = springboard_services_get_icon(self->_springboard, [bundleId UTF8String], &buf, &len);
-            if (!err && buf) {
-                data = [NSData dataWithBytes:buf length:len];
-                idevice_data_free((uint8_t *)buf, (uintptr_t)len);
-            } else if (err) idevice_error_free(err);
+        if (!data) {
+            [self ensureServiceConnected:@"SB"];
+            if (self->_springboard) {
+                void *buf = NULL; size_t len = 0;
+                struct IdeviceFfiError *err = springboard_services_get_icon(self->_springboard, [bundleId UTF8String], &buf, &len);
+                if (!err && buf) {
+                    data = [NSData dataWithBytes:buf length:len];
+                    idevice_data_free((uint8_t *)buf, (uintptr_t)len);
+                } else if (err) idevice_error_free(err);
+            }
         }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(data ? [UIImage imageWithData:data] : nil); });
     });
@@ -312,10 +316,11 @@
 
 - (void)simulateLocationWithLatitude:(double)lat longitude:(double)lon {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Modern"];
         if (self->_locationSimulationNew) {
             location_simulation_set(self->_locationSimulationNew, lat, lon);
         } else if (self->_provider) {
-            if (!self->_locationSimulation) lockdown_location_simulation_connect(self->_provider, &self->_locationSimulation);
+            [self ensureServiceConnected:@"LegacyLocation"];
             if (self->_locationSimulation) lockdown_location_simulation_set(self->_locationSimulation, [[NSString stringWithFormat:@"%f", lat] UTF8String], [[NSString stringWithFormat:@"%f", lon] UTF8String]);
         }
     });
@@ -332,6 +337,7 @@
 
 - (void)afcListDirectory:(NSString *)path completion:(void (^)(NSArray *items, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"AFC"];
         if (!self->_afc) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"AFC" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"AFC not connected"}]); }); return; }
         char **entries = NULL; size_t count = 0;
         struct IdeviceFfiError *err = afc_list_directory(self->_afc, [path UTF8String], &entries, &count);
@@ -360,6 +366,7 @@
 
 - (void)afcReadFile:(NSString *)path completion:(void (^)(NSData *data, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"AFC"];
         if (!self->_afc) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"AFC" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"AFC not connected"}]); }); return; }
         struct AfcFileHandle *fh = NULL;
         struct IdeviceFfiError *err = afc_file_open(self->_afc, [path UTF8String], AfcRdOnly, &fh);
@@ -381,6 +388,7 @@
 
 - (void)afcWriteFile:(NSString *)path data:(NSData *)data completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"AFC"];
         if (!self->_afc) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"AFC" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"AFC not connected"}]); }); return; }
         struct AfcFileHandle *fh = NULL;
         struct IdeviceFfiError *err = afc_file_open(self->_afc, [path UTF8String], AfcWr, &fh);
@@ -395,6 +403,7 @@
 
 - (void)afcDeleteFile:(NSString *)path completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"AFC"];
         if (!self->_afc) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"AFC" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"AFC not connected"}]); }); return; }
         struct IdeviceFfiError *err = afc_remove_path(self->_afc, [path UTF8String]);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"AFC" code:-5 userInfo:@{NSLocalizedDescriptionKey: @"Delete failed"}]); }); }
@@ -404,6 +413,7 @@
 
 - (void)afcMakeDirectory:(NSString *)path completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"AFC"];
         if (!self->_afc) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"AFC" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"AFC not connected"}]); }); return; }
         struct IdeviceFfiError *err = afc_make_directory(self->_afc, [path UTF8String]);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"AFC" code:-6 userInfo:@{NSLocalizedDescriptionKey: @"Make directory failed"}]); }); }
@@ -413,6 +423,7 @@
 
 - (void)afcRenamePath:(NSString *)oldPath toPath:(NSString *)newPath completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"AFC"];
         if (!self->_afc) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"AFC" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"AFC not connected"}]); }); return; }
         struct IdeviceFfiError *err = afc_rename_path(self->_afc, [oldPath UTF8String], [newPath UTF8String]);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"AFC" code:-7 userInfo:@{NSLocalizedDescriptionKey: @"Rename failed"}]); }); }
@@ -490,6 +501,7 @@
 
 - (void)fetchInterfaceOrientationWithCompletion:(void (^)(int orientation, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"SB"];
         if (!self->_springboard) { dispatch_async(dispatch_get_main_queue(), ^{ completion(0, [NSError errorWithDomain:@"SB" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
         uint8_t orientation = 0;
         struct IdeviceFfiError *err = springboard_services_get_interface_orientation(self->_springboard, &orientation);
@@ -500,6 +512,7 @@
 
 - (void)fetchHomeScreenWallpaperWithCompletion:(void (^)(UIImage *image, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"SB"];
         if (!self->_springboard) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"SB" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
         void *buf = NULL; size_t len = 0;
         struct IdeviceFfiError *err = springboard_services_get_home_screen_wallpaper_preview(self->_springboard, &buf, &len);
@@ -516,6 +529,7 @@
 
 - (void)fetchLockScreenWallpaperWithCompletion:(void (^)(UIImage *image, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"SB"];
         if (!self->_springboard) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"SB" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
         void *buf = NULL; size_t len = 0;
         struct IdeviceFfiError *err = springboard_services_get_lock_screen_wallpaper_preview(self->_springboard, &buf, &len);
@@ -532,6 +546,7 @@
 
 - (void)restartDeviceWithCompletion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Diag"];
         if (!self->_diagnostics) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Diag" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
         struct IdeviceFfiError *err = diagnostics_relay_client_restart(self->_diagnostics);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Diag" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed"}]); }); }
@@ -543,6 +558,7 @@
 
 - (void)fetchProfilesWithCompletion:(void (^)(NSArray<NSData *> *profiles, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Misagent"];
         if (!self->_misagent) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"Misagent" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
         uint8_t **result = NULL; size_t *lens = NULL; size_t count = 0;
         struct IdeviceFfiError *err = misagent_copy_all(self->_misagent, &result, &lens, &count);
@@ -565,6 +581,7 @@
 
 - (void)installProfile:(NSData *)profileData completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Misagent"];
         if (!self->_misagent) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Misagent" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
         struct IdeviceFfiError *err = misagent_install(self->_misagent, (const uint8_t *)profileData.bytes, (size_t)profileData.length);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Misagent" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Failed"}]); }); }
@@ -574,6 +591,7 @@
 
 - (void)removeProfileWithUUID:(NSString *)uuid completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Misagent"];
         if (!self->_misagent) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Misagent" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
         struct IdeviceFfiError *err = misagent_remove(self->_misagent, [uuid UTF8String]);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Misagent" code:-4 userInfo:@{NSLocalizedDescriptionKey: @"Failed"}]); }); }
@@ -583,6 +601,7 @@
 
 - (void)fetchProcessListWithCompletion:(void (^)(NSArray<NSDictionary *> *processes, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Modern"];
         if (!self->_appService) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"Process" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
         struct ProcessTokenC *list = NULL; uintptr_t count = 0;
         struct IdeviceFfiError *err = app_service_list_processes(self->_appService, &list, &count);
@@ -606,6 +625,7 @@
 
 - (void)killProcessWithPid:(uint64_t)pid completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Modern"];
         if (!self->_remoteServer) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"Process" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Not connected"}]); }); return; }
         struct ProcessControlHandle *pc = NULL;
         struct IdeviceFfiError *err = process_control_new(self->_remoteServer, &pc);
@@ -620,6 +640,7 @@
 
 - (void)upgradeAppAtDevicePath:(NSString *)path completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"InstProxy"];
         if (!self->_instproxy) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"InstProxy" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Installation Proxy not connected"}]); }); return; }
         struct IdeviceFfiError *err = installation_proxy_upgrade(self->_instproxy, [path UTF8String], NULL);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"InstProxy" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Upgrade failed"}]); }); }
@@ -629,6 +650,7 @@
 
 - (void)browseAppsWithOptions:(NSDictionary *)options completion:(void (^)(NSArray *apps, NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"InstProxy"];
         if (!self->_instproxy) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, [NSError errorWithDomain:@"InstProxy" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Installation Proxy not connected"}]); }); return; }
         plist_t optPlist = options ? [PlistUtils plistFromObject:options] : NULL; plist_t *result = NULL; size_t len = 0; struct IdeviceFfiError *err = installation_proxy_browse(self->_instproxy, optPlist, &result, &len);
         if (optPlist) plist_free(optPlist);
@@ -645,6 +667,7 @@
 
 - (void)mountDeveloperDiskImage:(NSString *)path completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Mounter"];
         if (!self->_imageMounter) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"DDI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Image Mounter not connected"}]); }); return; }
         NSString *sigPath = [path stringByAppendingString:@".signature"];
         NSData *imgData = [NSData dataWithContentsOfFile:path]; NSData *sigData = [NSData dataWithContentsOfFile:sigPath];
@@ -657,24 +680,42 @@
 
 - (void)enableJITForBundleId:(NSString *)bundleId completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Modern"];
         if (!self->_remoteServer) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"JIT" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"CoreDevice not connected"}]); }); return; }
         struct ProcessControlHandle *pc = NULL; struct IdeviceFfiError *err = process_control_new(self->_remoteServer, &pc);
         if (err || !pc) { if (err) idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"JIT" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to create process control"}]); }); return; }
         uint64_t pid = 0; err = process_control_launch_app(pc, [bundleId UTF8String], NULL, 0, NULL, 0, YES, YES, &pid); process_control_free(pc);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"JIT" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Failed to launch app suspended"}]); }); return; }
-        struct DebugProxyHandle *debug = NULL; err = debug_proxy_connect_rsd(self->_adapter, self->_rsdHandshake, &debug); if (!err && debug) debug_proxy_free(debug); else if (err) idevice_error_free(err);
+        struct DebugProxyHandle *debug = NULL;
+        uint16_t rsdPort = 0;
+        core_device_proxy_get_server_rsd_port(self->_coreDeviceProxy, &rsdPort);
+        struct ReadWriteOpaque *socketDP = NULL;
+        adapter_connect(self->_adapter, rsdPort, &socketDP);
+        if (socketDP) {
+             struct RsdHandshakeHandle *hsDP = NULL;
+             rsd_handshake_new(socketDP, &hsDP);
+             if (hsDP) debug_proxy_connect_rsd(self->_adapter, hsDP, &debug);
+        }
+        if (debug) debug_proxy_free(debug);
         dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
     });
 }
 
 - (void)autoFetchAndMountDDIWithCompletion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Mounter"];
         if (!self->_lockdown || !self->_imageMounter) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"DDI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Service not connected"}]); }); return; }
         plist_t chipIdPlist = NULL; plist_t versionPlist = NULL;
         lockdownd_get_value(self->_lockdown, "UniqueChipID", NULL, &chipIdPlist);
         lockdownd_get_value(self->_lockdown, "ProductVersion", NULL, &versionPlist);
         uint64_t ecid = 0; NSString *version = @"";
-        if (chipIdPlist) { plist_get_uint_val(chipIdPlist, &ecid); plist_free(chipIdPlist); }
+        if (chipIdPlist) {
+             if (plist_get_uint_val(chipIdPlist, &ecid) != 0) {
+                 char *s = NULL; plist_get_string_val(chipIdPlist, &s);
+                 if (s) { ecid = (uint64_t)atoll(s); plist_mem_free(s); }
+             }
+             plist_free(chipIdPlist);
+        }
         if (versionPlist) { char *v = NULL; plist_get_string_val(versionPlist, &v); if (v) { version = [NSString stringWithUTF8String:v]; plist_mem_free(v); } plist_free(versionPlist); }
         [self log:[NSString stringWithFormat:@"[DDI] Device ECID: %llu, Version: %@", ecid, version]]; dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ completion(nil); });
     });
@@ -682,6 +723,7 @@
 
 - (void)postNotification:(NSString *)name {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"NP"];
         if (!self->_notificationProxy) return;
         struct IdeviceFfiError *err = notification_proxy_post(self->_notificationProxy, [name UTF8String]);
         if (err) { [self log:[NSString stringWithFormat:@"[NP] Post failed: %s", err->message]]; idevice_error_free(err); } else [self log:[NSString stringWithFormat:@"[NP] Posted: %@", name]];
@@ -690,6 +732,7 @@
 
 - (void)observeNotification:(NSString *)name {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"NP"];
         if (!self->_notificationProxy) return;
         struct IdeviceFfiError *err = notification_proxy_observe(self->_notificationProxy, [name UTF8String]);
         if (err) { [self log:[NSString stringWithFormat:@"[NP] Observe failed: %s", err->message]]; idevice_error_free(err); } else { [self log:[NSString stringWithFormat:@"[NP] Observing: %@", name]]; [self startNotificationListener]; }
@@ -708,6 +751,7 @@
 
 - (void)installAppAtDevicePath:(NSString *)path completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"InstProxy"];
         if (!self->_instproxy) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"InstProxy" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Installation Proxy not connected"}]); }); return; }
         struct IdeviceFfiError *err = installation_proxy_install(self->_instproxy, [path UTF8String], NULL);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"InstProxy" code:-2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to install app"}]); }); }
@@ -717,7 +761,9 @@
 
 - (void)uninstallAppWithBundleId:(NSString *)bundleId completion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
+        [self ensureServiceConnected:@"Modern"];
         if (self->_appService) { struct IdeviceFfiError *err = app_service_uninstall_app(self->_appService, [bundleId UTF8String]); if (!err) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); }); return; } else idevice_error_free(err); }
+        [self ensureServiceConnected:@"InstProxy"];
         if (!self->_instproxy) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"InstProxy" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Installation Proxy not connected"}]); }); return; }
         struct IdeviceFfiError *err = installation_proxy_uninstall(self->_instproxy, [bundleId UTF8String], NULL);
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"InstProxy" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Failed to uninstall app"}]); }); }
