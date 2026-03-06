@@ -1,4 +1,6 @@
-#import "DeviceConnectionManager.h"
+import sys
+
+content = r"""#import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -875,3 +877,7 @@
 }
 
 @end
+"""
+
+with open('DeviceConnectionManager.mm', 'w') as f:
+    f.write(content)
