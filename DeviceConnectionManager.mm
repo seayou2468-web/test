@@ -185,17 +185,21 @@
             socket = NULL; // Consumed
             if (!err && handshake) {
                 struct CRsdServiceArray *services = NULL;
-                if (rsd_get_services(handshake, &services) == NULL && services) {
+                struct IdeviceFfiError *svcErr = rsd_get_services(handshake, &services);
+                if (!svcErr && services) {
                     for (size_t i = 0; i < services->count; i++) {
-                        if (strcmp(services->services[i].name, "com.apple.coredevice.appservice") == 0) {
+                        if (services->services[i].name && strcmp(services->services[i].name, "com.apple.coredevice.appservice") == 0) {
                             _appServicePort = services->services[i].port;
                             break;
                         }
                     }
                     rsd_free_services(services);
+                    _discoveryDone = YES;
+                } else if (svcErr) {
+                    [self log:[NSString stringWithFormat:@"[MODERN] RSD Get Services Fail: %s", svcErr->message]];
+                    idevice_error_free(svcErr);
                 }
                 rsd_handshake_free(handshake);
-                _discoveryDone = YES;
             }
         }
     } else if ([name isEqualToString:@"RemoteServer"] && !_remoteServer) {
@@ -212,7 +216,8 @@
                     hsRS = NULL; // Consumed
                     if (!err && _remoteServer) {
                         [self log:@"[MODERN] RemoteServer Connected."];
-                        location_simulation_new(_remoteServer, &_locationSimulationNew);
+                        struct IdeviceFfiError *locErr = location_simulation_new(_remoteServer, &_locationSimulationNew);
+                        if (locErr) { [self log:[NSString stringWithFormat:@"[MODERN] LocSim init fail: %s", locErr->message]]; idevice_error_free(locErr); }
                     }
                 }
             }
@@ -826,6 +831,12 @@
         plist_t chipIdPlist = NULL; plist_t versionPlist = NULL;
 
         IdeviceFfiError *ecidErr = lockdownd_get_value(self->_lockdown, "UniqueChipID", NULL, &chipIdPlist);
+        if (ecidErr && ecidErr->message && strcmp(ecidErr->message, "GetProhibited") == 0) {
+            idevice_error_free(ecidErr);
+            [self log:@"[DDI] UniqueChipID prohibited in default domain, trying com.apple.mobile.iTunes"];
+            ecidErr = lockdownd_get_value(self->_lockdown, "UniqueChipID", "com.apple.mobile.iTunes", &chipIdPlist);
+        }
+
         lockdownd_get_value(self->_lockdown, "ProductVersion", NULL, &versionPlist);
 
         uint64_t ecid = 0; NSString *version = @"";
@@ -835,16 +846,17 @@
                  plist_get_uint_val(chipIdPlist, &ecid);
              } else if (t == PLIST_STRING) {
                  char *s = NULL; plist_get_string_val(chipIdPlist, &s);
-                 if (s) {
-                     ecid = (uint64_t)strtoull(s, NULL, 0);
-                     plist_mem_free(s);
-                 }
+                 if (s) { ecid = (uint64_t)strtoull(s, NULL, 0); plist_mem_free(s); }
+             } else if (t == PLIST_DATA) {
+                 char *d = NULL; uint64_t l = 0; plist_get_data_val(chipIdPlist, &d, &l);
+                 if (d && l >= 8) { memcpy(&ecid, d, 8); }
+                 if (d) plist_mem_free(d);
              } else {
                  [self log:[NSString stringWithFormat:@"[WARN] Unexpected ECID type: %d", (int)t]];
              }
              plist_free(chipIdPlist);
         } else if (ecidErr) {
-             [self log:[NSString stringWithFormat:@"[WARN] Get ECID fail: %s", ecidErr->message]];
+             [self log:[NSString stringWithFormat:@"[WARN] Get ECID fail: %s", ecidErr->message ? ecidErr->message : "Unknown error"]];
              idevice_error_free(ecidErr);
         }
 
