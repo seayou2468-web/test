@@ -32,7 +32,8 @@
     NSInteger _activeToken;
     NSTimeInterval _lastLocationUpdate;
     BOOL _syslogRunning;
-    uint16_t _rsdPort;
+    uint16_t _baseRsdPort;
+    uint16_t _appServicePort;
 }
 @property (nonatomic, strong) NSTimer *heartbeatTimer;
 @property (nonatomic, copy) void (^syslogHandler)(NSString *);
@@ -152,50 +153,51 @@
         err = mcinstaller_connect(_provider, &_mcinstaller);
     } else if ([name isEqualToString:@"Diag"] && !_diagnostics) {
         err = diagnostics_relay_client_connect(_provider, &_diagnostics);
-    } else if ([name isEqualToString:@"ModernProxy"] && !_adapter) {
-        [self log:@"[MODERN] Connecting Proxy..."];
+    } else if ([name isEqualToString:@"RemoteServer"] && !_remoteServer) {
+        [self log:@"[MODERN] Connecting RemoteServer path..."];
         err = core_device_proxy_connect(_provider, &_coreDeviceProxy);
         if (!err && _coreDeviceProxy) {
-            _rsdPort = 0;
-            err = core_device_proxy_get_server_rsd_port(_coreDeviceProxy, &_rsdPort);
-            if (!err && _rsdPort > 0) {
-                [self log:[NSString stringWithFormat:@"[MODERN] RSD Port: %u", _rsdPort]];
-                usleep(500000);
+            _baseRsdPort = 0;
+            err = core_device_proxy_get_server_rsd_port(_coreDeviceProxy, &_baseRsdPort);
+            if (!err && _baseRsdPort > 0) {
                 err = core_device_proxy_create_tcp_adapter(_coreDeviceProxy, &_adapter);
-                _coreDeviceProxy = NULL; // Handle is consumed
-            } else {
-                if (err) [self log:[NSString stringWithFormat:@"[WARN] Proxy Port Fail: %s", err->message]];
-                core_device_proxy_free(_coreDeviceProxy); _coreDeviceProxy = NULL;
-            }
-        } else if (err) {
-            [self log:[NSString stringWithFormat:@"[WARN] Proxy Connect Fail: %s", err->message]];
-        }
-    } else if ([name isEqualToString:@"RemoteServer"] && !_remoteServer) {
-        [self ensureServiceConnected:@"ModernProxy"];
-        if (_adapter && _rsdPort > 0) {
-            usleep(500000);
-            struct ReadWriteOpaque *socketRS = NULL;
-            err = adapter_connect(_adapter, _rsdPort, &socketRS);
-            if (!err && socketRS) {
-                struct RsdHandshakeHandle *hsRS = NULL;
-                err = rsd_handshake_new(socketRS, &hsRS);
-                socketRS = NULL; // Consumed
-                if (!err && hsRS) {
-                    err = remote_server_connect_rsd(_adapter, hsRS, &_remoteServer);
-                    hsRS = NULL; // Consumed
-                    if (!err && _remoteServer) {
-                        [self log:@"[MODERN] RemoteServer Connected."];
-                        location_simulation_new(_remoteServer, &_locationSimulationNew);
+                _coreDeviceProxy = NULL; // Consumed
+                if (!err && _adapter) {
+                    struct ReadWriteOpaque *socketRS = NULL;
+                    err = adapter_connect(_adapter, _baseRsdPort, &socketRS);
+                    if (!err && socketRS) {
+                        struct RsdHandshakeHandle *hsRS = NULL;
+                        err = rsd_handshake_new(socketRS, &hsRS);
+                        socketRS = NULL; // Consumed
+                        if (!err && hsRS) {
+                            // Discover AppService port before consuming handshake
+                            struct CRsdServiceArray *services = NULL;
+                            if (rsd_get_services(hsRS, &services) == NULL && services) {
+                                for (size_t i = 0; i < services->count; i++) {
+                                    if (strcmp(services->services[i].name, "com.apple.coredevice.appservice") == 0) {
+                                        _appServicePort = services->services[i].port;
+                                        break;
+                                    }
+                                }
+                                rsd_free_services(services);
+                            }
+
+                            err = remote_server_connect_rsd(_adapter, hsRS, &_remoteServer);
+                            hsRS = NULL; // Consumed
+                            if (!err && _remoteServer) {
+                                [self log:@"[MODERN] RemoteServer Connected."];
+                                location_simulation_new(_remoteServer, &_locationSimulationNew);
+                            }
+                        }
                     }
                 }
-            }
+            } else if (err) { core_device_proxy_free(_coreDeviceProxy); _coreDeviceProxy = NULL; }
         }
     } else if ([name isEqualToString:@"AppService"] && !_appService) {
-        [self ensureServiceConnected:@"ModernProxy"];
-        if (_adapter && _rsdPort > 0) {
-            usleep(500000);
+        [self ensureServiceConnected:@"RemoteServer"];
+        if (_adapter && _appServicePort > 0) {
             struct ReadWriteOpaque *socketAS = NULL;
-            err = adapter_connect(_adapter, _rsdPort, &socketAS);
+            err = adapter_connect(_adapter, _appServicePort, &socketAS);
             if (!err && socketAS) {
                 struct RsdHandshakeHandle *hsAS = NULL;
                 err = rsd_handshake_new(socketAS, &hsAS);
@@ -206,6 +208,19 @@
                     if (!err && _appService) [self log:@"[MODERN] AppService Connected."];
                 }
             }
+        } else if (_adapter && _baseRsdPort > 0 && _appServicePort == 0) {
+             [self log:@"[WARN] AppService port not discovered, attempting base port..."];
+             struct ReadWriteOpaque *socketAS = NULL;
+             err = adapter_connect(_adapter, _baseRsdPort, &socketAS);
+             if (!err && socketAS) {
+                 struct RsdHandshakeHandle *hsAS = NULL;
+                 err = rsd_handshake_new(socketAS, &hsAS);
+                 socketAS = NULL;
+                 if (!err && hsAS) {
+                     err = app_service_connect_rsd(_adapter, hsAS, &_appService);
+                     hsAS = NULL;
+                 }
+             }
         }
     } else if ([name isEqualToString:@"LegacyLocation"] && !_locationSimulation) {
         err = lockdown_location_simulation_connect(_provider, &_locationSimulation);
@@ -238,6 +253,8 @@
     if (_pairingFile) { idevice_pairing_file_free(_pairingFile); _pairingFile = NULL; }
     if (_locationSimulation) { lockdown_location_simulation_free(_locationSimulation); _locationSimulation = NULL; }
 
+    _baseRsdPort = 0;
+    _appServicePort = 0;
     [self updateStatus:@"Disconnected" color:[UIColor systemRedColor]];
 }
 
@@ -298,7 +315,6 @@
         }
 
         if (!success) {
-            usleep(500000);
             [self ensureServiceConnected:@"InstProxy"];
             if (self->_instproxy) {
                 plist_t *result = NULL; size_t len = 0;
@@ -331,7 +347,6 @@
         }
 
         if (!data) {
-            usleep(500000);
             [self ensureServiceConnected:@"SB"];
             if (self->_springboard) {
                 void *buf = NULL; size_t len = 0;
@@ -768,10 +783,10 @@
         if (err) { idevice_error_free(err); dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"JIT" code:-3 userInfo:@{NSLocalizedDescriptionKey: @"Failed to launch app suspended"}]); }); return; }
 
         struct DebugProxyHandle *debug = NULL;
-        if (_adapter && _rsdPort > 0) {
+        if (_adapter && _baseRsdPort > 0) {
             struct ReadWriteOpaque *socketDP = NULL;
-            err = adapter_connect(_adapter, _rsdPort, &socketDP);
-            if (!err && socketDP) {
+            adapter_connect(_adapter, _baseRsdPort, &socketDP);
+            if (socketDP) {
                  struct RsdHandshakeHandle *hsDP = NULL;
                  err = rsd_handshake_new(socketDP, &hsDP);
                  socketDP = NULL;
