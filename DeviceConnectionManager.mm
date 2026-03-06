@@ -101,7 +101,7 @@
 
     if (!check()) return;
     err = idevice_tcp_provider_new((const struct sockaddr *)&addr, _pairingFile, "mdk-provider", &_provider);
-    _pairingFile = NULL; // Consumed by provider_new
+    _pairingFile = NULL; // Consumed
     if (err || !_provider) {
         [self log:[NSString stringWithFormat:@"[ERROR] Provider creation: %s", err ? err->message : "NULL"]];
         if (err) idevice_error_free(err);
@@ -147,12 +147,14 @@
     if (err) { [self log:[NSString stringWithFormat:@"[WARN] Diag: %s", err->message]]; idevice_error_free(err); }
 
     // Modern services (iOS 17+)
+    [NSThread sleepForTimeInterval:0.5];
     err = core_device_proxy_connect(_provider, &_coreDeviceProxy);
     if (!err && _coreDeviceProxy) {
         uint16_t rsdPort = 0;
         err = core_device_proxy_get_server_rsd_port(_coreDeviceProxy, &rsdPort);
         if (!err && rsdPort > 0) {
             err = core_device_proxy_create_tcp_adapter(_coreDeviceProxy, &_adapter);
+            _coreDeviceProxy = NULL; // Consumed
             if (!err && _adapter) {
                 // Connect Remote Server
                 struct ReadWriteOpaque *socketRS = NULL;
@@ -184,7 +186,6 @@
                 } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] SocketAS: %s", err->message]]; idevice_error_free(err); }
             } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] Adapter: %s", err->message]]; idevice_error_free(err); }
         } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] RSD Port: %s", err->message]]; idevice_error_free(err); }
-        core_device_proxy_free(_coreDeviceProxy); _coreDeviceProxy = NULL; // Finished with it
     } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] CoreDeviceProxy: %s", err->message]]; idevice_error_free(err); }
 }
 
@@ -239,6 +240,7 @@
                 heartbeat_send_polo(self->_heartbeat);
             } else {
                 idevice_error_free(err);
+                heartbeat_client_free(self->_heartbeat); self->_heartbeat = NULL;
             }
         }
     });
@@ -250,6 +252,7 @@
     NSInteger token = _activeToken;
     dispatch_async(_connectionQueue, ^{
         NSMutableArray *apps = [NSMutableArray array];
+        BOOL success = NO;
         if (self->_appService) {
             struct AppListEntryC *list = NULL; uintptr_t count = 0;
             struct IdeviceFfiError *err = app_service_list_apps(self->_appService, 1, 1, 1, 1, 1, &list, &count);
@@ -261,8 +264,11 @@
                     [apps addObject:dict];
                 }
                 app_service_free_app_list(list, count);
-            } else if (err) idevice_error_free(err);
-        } else if (self->_instproxy) {
+                success = YES;
+            } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] AppService List fail: %s", err->message]]; idevice_error_free(err); }
+        }
+
+        if (!success && self->_instproxy) {
             plist_t *result = NULL; size_t len = 0;
             struct IdeviceFfiError *err = installation_proxy_browse(self->_instproxy, NULL, &result, &len);
             if (!err && result) {
@@ -272,7 +278,7 @@
                     if ([obj isKindOfClass:[NSDictionary class]]) [apps addObject:obj];
                 }
                 idevice_plist_array_free(plistArray, len);
-            } else if (err) idevice_error_free(err);
+            } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] InstProxy Browse fail: %s", err->message]]; idevice_error_free(err); }
         }
         [self.delegate managerDidReceiveAppList:apps token:token];
     });
@@ -287,8 +293,16 @@
             if (!err && icon_data) {
                 data = [NSData dataWithBytes:icon_data->data length:icon_data->data_len];
                 app_service_free_icon_data(icon_data);
-            }
-            else if (err) idevice_error_free(err);
+            } else if (err) idevice_error_free(err);
+        }
+
+        if (!data && self->_springboard) {
+            void *buf = NULL; size_t len = 0;
+            struct IdeviceFfiError *err = springboard_services_get_icon(self->_springboard, [bundleId UTF8String], &buf, &len);
+            if (!err && buf) {
+                data = [NSData dataWithBytes:buf length:len];
+                idevice_data_free((uint8_t *)buf, (uintptr_t)len);
+            } else if (err) idevice_error_free(err);
         }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(data ? [UIImage imageWithData:data] : nil); });
     });
@@ -656,8 +670,12 @@
 - (void)autoFetchAndMountDDIWithCompletion:(void (^)(NSError *error))completion {
     dispatch_async(_connectionQueue, ^{
         if (!self->_lockdown || !self->_imageMounter) { dispatch_async(dispatch_get_main_queue(), ^{ completion([NSError errorWithDomain:@"DDI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Service not connected"}]); }); return; }
-        plist_t chipIdPlist = NULL; plist_t versionPlist = NULL; lockdownd_get_value(self->_lockdown, "UniqueChipID", NULL, &chipIdPlist); lockdownd_get_value(self->_lockdown, "ProductVersion", NULL, &versionPlist);
-        uint64_t ecid = 0; NSString *version = @""; if (chipIdPlist) { plist_get_uint_val(chipIdPlist, &ecid); plist_free(chipIdPlist); } if (versionPlist) { char *v = NULL; plist_get_string_val(versionPlist, &v); if (v) { version = [NSString stringWithUTF8String:v]; plist_mem_free(v); } plist_free(versionPlist); }
+        plist_t chipIdPlist = NULL; plist_t versionPlist = NULL;
+        lockdownd_get_value(self->_lockdown, "UniqueChipID", NULL, &chipIdPlist);
+        lockdownd_get_value(self->_lockdown, "ProductVersion", NULL, &versionPlist);
+        uint64_t ecid = 0; NSString *version = @"";
+        if (chipIdPlist) { plist_get_uint_val(chipIdPlist, &ecid); plist_free(chipIdPlist); }
+        if (versionPlist) { char *v = NULL; plist_get_string_val(versionPlist, &v); if (v) { version = [NSString stringWithUTF8String:v]; plist_mem_free(v); } plist_free(versionPlist); }
         [self log:[NSString stringWithFormat:@"[DDI] Device ECID: %llu, Version: %@", ecid, version]]; dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ completion(nil); });
     });
 }
