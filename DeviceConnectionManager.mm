@@ -253,15 +253,14 @@
     dispatch_async(_connectionQueue, ^{
         [self ensureServiceConnected:@"Modern"];
         if (self->_appService) {
-             struct AppListC *list = NULL; uintptr_t count = 0;
+             struct AppListEntryC *list = NULL; uintptr_t count = 0;
              struct IdeviceFfiError *err = app_service_list_apps(self->_appService, 1, 1, 1, 1, 1, &list, &count);
              if (!err && list) {
                  NSMutableArray *apps = [NSMutableArray array];
                  for (uintptr_t i = 0; i < count; i++) {
                      NSMutableDictionary *d = [NSMutableDictionary dictionary];
                      if (list[i].bundle_identifier) d[@"CFBundleIdentifier"] = [NSString stringWithUTF8String:list[i].bundle_identifier];
-                     if (list[i].bundle_name) d[@"CFBundleName"] = [NSString stringWithUTF8String:list[i].bundle_name];
-                     if (list[i].bundle_display_name) d[@"CFBundleDisplayName"] = [NSString stringWithUTF8String:list[i].bundle_display_name];
+                     if (list[i].name) d[@"CFBundleName"] = [NSString stringWithUTF8String:list[i].name];
                      if (list[i].bundle_version) d[@"CFBundleVersion"] = [NSString stringWithUTF8String:list[i].bundle_version];
                      [apps addObject:d];
                  }
@@ -344,13 +343,15 @@
     dispatch_async(_connectionQueue, ^{
         [self ensureServiceConnected:@"Modern"];
         if (self->_locationSimulationNew) {
-            struct IdeviceFfiError *err = location_simulation_set_location(self->_locationSimulationNew, lat, lon);
+            struct IdeviceFfiError *err = location_simulation_set(self->_locationSimulationNew, lat, lon);
             if (!err) { [self log:[NSString stringWithFormat:@"[LOC] Set to %f, %f (Modern)", lat, lon]]; return; }
             else idevice_error_free(err);
         }
         [self ensureServiceConnected:@"LegacyLocation"];
         if (self->_locationSimulation) {
-            struct IdeviceFfiError *err = lockdown_location_simulation_set_location(self->_locationSimulation, lat, lon);
+            NSString *slat = [NSString stringWithFormat:@"%f", lat];
+            NSString *slon = [NSString stringWithFormat:@"%f", lon];
+            struct IdeviceFfiError *err = lockdown_location_simulation_set(self->_locationSimulation, [slat UTF8String], [slon UTF8String]);
             if (!err) { [self log:[NSString stringWithFormat:@"[LOC] Set to %f, %f (Legacy)", lat, lon]]; }
             else { [self log:[NSString stringWithFormat:@"[LOC] Failed: %s", err->message]]; idevice_error_free(err); }
         }
@@ -361,12 +362,12 @@
     dispatch_async(_connectionQueue, ^{
         [self ensureServiceConnected:@"Modern"];
         if (self->_locationSimulationNew) {
-            location_simulation_clear_location(self->_locationSimulationNew);
+            location_simulation_clear(self->_locationSimulationNew);
             [self log:@"[LOC] Cleared (Modern)"];
         }
         [self ensureServiceConnected:@"LegacyLocation"];
         if (self->_locationSimulation) {
-            lockdown_location_simulation_clear_location(self->_locationSimulation);
+            lockdown_location_simulation_clear(self->_locationSimulation);
             [self log:@"[LOC] Cleared (Legacy)"];
         }
     });
@@ -506,7 +507,7 @@
 - (void)startSyslogStreamingWithHandler:(void (^)(NSString *logLine))handler {
     dispatch_async(_connectionQueue, ^{
         if (self->_syslogRunning) return;
-        struct IdeviceFfiError *err = syslog_relay_connect(_provider, &self->_syslog);
+        struct IdeviceFfiError *err = syslog_relay_connect_tcp(_provider, &self->_syslog);
         if (err || !self->_syslog) { if (err) idevice_error_free(err); return; }
         self->_syslogRunning = YES; self.syslogHandler = handler;
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
