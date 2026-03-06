@@ -1,4 +1,6 @@
-#import "DeviceConnectionManager.h"
+import sys
+
+content = r"""#import "DeviceConnectionManager.h"
 #import "PlistUtils.h"
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -129,7 +131,7 @@
 
     [self startHeartbeat];
 
-    // Warm up modern path immediately
+    // Pre-heat Modern Path to improve perceived speed
     [self ensureServiceConnected:@"AppService"];
 
     plist_t val = NULL;
@@ -164,7 +166,7 @@
         if (_modernInfrastructureFailed) return;
 
         if (!_adapter) {
-            [self log:@"[MODERN] Establishing Infrastructure..."];
+            [self log:@"[MODERN] Warming up Infrastructure..."];
             err = core_device_proxy_connect(_provider, &_coreDeviceProxy);
             if (!err && _coreDeviceProxy) {
                 _baseRsdPort = 0;
@@ -173,8 +175,7 @@
                     struct CoreDeviceProxyHandle *tempProxy = _coreDeviceProxy;
                     _coreDeviceProxy = NULL; // Consumed
                     err = core_device_proxy_create_tcp_adapter(tempProxy, &_adapter);
-                } else {
-                    if (err) [self log:[NSString stringWithFormat:@"[WARN] Proxy Port Fail: %s", err->message]];
+                } else if (err) {
                     core_device_proxy_free(_coreDeviceProxy); _coreDeviceProxy = NULL;
                 }
             }
@@ -793,8 +794,8 @@
         struct DebugProxyHandle *debug = NULL;
         if (_adapter && _baseRsdPort > 0) {
             struct ReadWriteOpaque *socketDP = NULL;
-            adapter_connect(_adapter, _baseRsdPort, &socketDP);
-            if (socketDP) {
+            err = adapter_connect(_adapter, _baseRsdPort, &socketDP);
+            if (!err && socketDP) {
                  struct RsdHandshakeHandle *hsDP = NULL;
                  err = rsd_handshake_new(socketDP, &hsDP);
                  socketDP = NULL;
@@ -882,3 +883,7 @@
 }
 
 @end
+"""
+
+with open('DeviceConnectionManager.mm', 'w') as f:
+    f.write(content)
