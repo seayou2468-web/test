@@ -101,7 +101,7 @@
 
     if (!check()) return;
     err = idevice_tcp_provider_new((const struct sockaddr *)&addr, _pairingFile, "mdk-provider", &_provider);
-    _pairingFile = NULL;
+    _pairingFile = NULL; // Consumed by provider_new
     if (err || !_provider) {
         [self log:[NSString stringWithFormat:@"[ERROR] Provider creation: %s", err ? err->message : "NULL"]];
         if (err) idevice_error_free(err);
@@ -126,25 +126,25 @@
 
     // Connect other services
     err = springboard_services_connect(_provider, &_springboard);
-    if (err) idevice_error_free(err);
+    if (err) { [self log:[NSString stringWithFormat:@"[WARN] SB: %s", err->message]]; idevice_error_free(err); }
 
     err = installation_proxy_connect(_provider, &_instproxy);
-    if (err) idevice_error_free(err);
+    if (err) { [self log:[NSString stringWithFormat:@"[WARN] InstProxy: %s", err->message]]; idevice_error_free(err); }
 
     err = afc_client_connect(_provider, &_afc);
-    if (err) idevice_error_free(err);
+    if (err) { [self log:[NSString stringWithFormat:@"[WARN] AFC: %s", err->message]]; idevice_error_free(err); }
 
     err = image_mounter_connect(_provider, &_imageMounter);
-    if (err) idevice_error_free(err);
+    if (err) { [self log:[NSString stringWithFormat:@"[WARN] Mounter: %s", err->message]]; idevice_error_free(err); }
 
     err = notification_proxy_connect(_provider, &_notificationProxy);
-    if (err) idevice_error_free(err);
+    if (err) { [self log:[NSString stringWithFormat:@"[WARN] NP: %s", err->message]]; idevice_error_free(err); }
 
     err = misagent_connect(_provider, &_misagent);
-    if (err) idevice_error_free(err);
+    if (err) { [self log:[NSString stringWithFormat:@"[WARN] Misagent: %s", err->message]]; idevice_error_free(err); }
 
     err = diagnostics_relay_client_connect(_provider, &_diagnostics);
-    if (err) idevice_error_free(err);
+    if (err) { [self log:[NSString stringWithFormat:@"[WARN] Diag: %s", err->message]]; idevice_error_free(err); }
 
     // Modern services (iOS 17+)
     err = core_device_proxy_connect(_provider, &_coreDeviceProxy);
@@ -153,25 +153,39 @@
         err = core_device_proxy_get_server_rsd_port(_coreDeviceProxy, &rsdPort);
         if (!err && rsdPort > 0) {
             err = core_device_proxy_create_tcp_adapter(_coreDeviceProxy, &_adapter);
-            _coreDeviceProxy = NULL; // consumed
             if (!err && _adapter) {
-                struct ReadWriteOpaque *socket = NULL;
-                err = adapter_connect(_adapter, rsdPort, &socket);
-                if (!err && socket) {
-                    err = rsd_handshake_new(socket, &_rsdHandshake);
-                    if (!err && _rsdHandshake) {
-                        err = remote_server_connect_rsd(_adapter, _rsdHandshake, &_remoteServer);
-                        _rsdHandshake = NULL; // consumed
+                // Connect Remote Server
+                struct ReadWriteOpaque *socketRS = NULL;
+                err = adapter_connect(_adapter, rsdPort, &socketRS);
+                if (!err && socketRS) {
+                    struct RsdHandshakeHandle *handshakeRS = NULL;
+                    err = rsd_handshake_new(socketRS, &handshakeRS);
+                    if (!err && handshakeRS) {
+                        err = remote_server_connect_rsd(_adapter, handshakeRS, &_remoteServer);
                         if (!err && _remoteServer) {
+                            [self log:@"[CONN] Connected to RemoteServer."];
                             location_simulation_new(_remoteServer, &_locationSimulationNew);
-                            app_service_connect_rsd(_adapter, _rsdHandshake, &_appService);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (err) idevice_error_free(err);
+                        } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] RemoteServer: %s", err->message]]; idevice_error_free(err); }
+                    } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] HandshakeRS: %s", err->message]]; idevice_error_free(err); }
+                } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] SocketRS: %s", err->message]]; idevice_error_free(err); }
+
+                // Connect App Service
+                struct ReadWriteOpaque *socketAS = NULL;
+                err = adapter_connect(_adapter, rsdPort, &socketAS);
+                if (!err && socketAS) {
+                    struct RsdHandshakeHandle *handshakeAS = NULL;
+                    err = rsd_handshake_new(socketAS, &handshakeAS);
+                    if (!err && handshakeAS) {
+                        err = app_service_connect_rsd(_adapter, handshakeAS, &_appService);
+                        if (!err && _appService) {
+                             [self log:@"[CONN] Connected to AppService."];
+                        } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] AppService: %s", err->message]]; idevice_error_free(err); }
+                    } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] HandshakeAS: %s", err->message]]; idevice_error_free(err); }
+                } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] SocketAS: %s", err->message]]; idevice_error_free(err); }
+            } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] Adapter: %s", err->message]]; idevice_error_free(err); }
+        } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] RSD Port: %s", err->message]]; idevice_error_free(err); }
+        core_device_proxy_free(_coreDeviceProxy); _coreDeviceProxy = NULL; // Finished with it
+    } else if (err) { [self log:[NSString stringWithFormat:@"[WARN] CoreDeviceProxy: %s", err->message]]; idevice_error_free(err); }
 }
 
 - (void)cleanupInternal {
@@ -269,7 +283,7 @@
         NSData *data = nil;
         if (self->_appService) {
             struct IconDataC *icon_data = NULL;
-            struct IdeviceFfiError *err = app_service_fetch_app_icon(self->_appService, [bundleId UTF8String], 120.0, 120.0, 2.0, 1, &icon_data);
+            struct IdeviceFfiError *err = app_service_fetch_app_icon(self->_appService, [bundleId UTF8String], 120.0f, 120.0f, 2.0f, 1, &icon_data);
             if (!err && icon_data) {
                 data = [NSData dataWithBytes:icon_data->data length:icon_data->data_len];
                 app_service_free_icon_data(icon_data);
