@@ -7,6 +7,7 @@
 #import "AFCViewController.h"
 #import "NotificationViewController.h"
 #import "ProfileViewController.h"
+#import "ManagedConfigViewController.h"
 #import "SyslogViewController.h"
 #import "ProcessViewController.h"
 #import "HouseArrestViewController.h"
@@ -35,6 +36,7 @@ static char kIsMountKey;
 @property (nonatomic, strong) UIButton *autoMountButton;
 @property (nonatomic, strong) UIButton *proxyButton;
 @property (nonatomic, strong) UIButton *profileButton;
+@property (nonatomic, strong) UIButton *managedConfigButton;
 @property (nonatomic, strong) UIButton *syslogButton;
 @property (nonatomic, strong) UIButton *processButton;
 @property (nonatomic, strong) UIButton *houseArrestButton;
@@ -129,6 +131,7 @@ static char kIsMountKey;
     self.autoMountButton = [self createButton:@"Auto DDI" color:[UIColor systemOrangeColor] action:@selector(autoMountTapped)];
     self.proxyButton = [self createButton:@"Notif Proxy" color:[UIColor systemPinkColor] action:@selector(proxyTapped)];
     self.profileButton = [self createButton:@"Profiles" color:[UIColor systemPurpleColor] action:@selector(profileTapped)];
+    self.managedConfigButton = [self createButton:@"MCInstaller" color:[UIColor systemTealColor] action:@selector(managedConfigTapped)];
     self.syslogButton = [self createButton:@"Syslog" color:[UIColor systemGrayColor] action:@selector(syslogTapped)];
     self.processButton = [self createButton:@"Processes" color:[UIColor systemBrownColor] action:@selector(processTapped)];
     self.houseArrestButton = [self createButton:@"House Arrest" color:[UIColor systemCyanColor] action:@selector(houseArrestTapped)];
@@ -140,9 +143,9 @@ static char kIsMountKey;
         self.locationButton, self.afcButton,
         self.mountButton, self.autoMountButton,
         self.proxyButton, self.profileButton,
-        self.syslogButton, self.processButton,
-        self.houseArrestButton, self.restartButton,
-        self.springboardButton
+        self.managedConfigButton, self.syslogButton,
+        self.processButton, self.houseArrestButton,
+        self.restartButton, self.springboardButton
     ];
 
     for (UIButton *b in btns) {
@@ -152,44 +155,43 @@ static char kIsMountKey;
 }
 
 - (void)setupConstraints {
-    UIView *vStatus = (UIView *)self.statusLabel;
-    UIView *vSegment = (UIView *)self.segmentedControl;
-    UIView *vLog = (UIView *)self.logView;
-    UIView *vTable = (UIView *)self.tableView;
-    UIView *vScroll = (UIView *)self.buttonScrollView;
-    UIView *vCont = (UIView *)self.buttonContainer;
-    UIView *vView = (UIView *)self.view;
+    UIView *vSL = (UIView *)self.statusLabel;
+    UIView *vSC = (UIView *)self.segmentedControl;
+    UIView *vTV = (UIView *)self.tableView;
+    UIView *vLV = (UIView *)self.logView;
+    UIView *vBSV = (UIView *)self.buttonScrollView;
+    UIView *vBC = (UIView *)self.buttonContainer;
 
     [NSLayoutConstraint activateConstraints:@[
-        [vStatus.topAnchor constraintEqualToAnchor:vView.safeAreaLayoutGuide.topAnchor constant:10],
-        [vStatus.leadingAnchor constraintEqualToAnchor:vView.leadingAnchor constant:20],
-        [vStatus.trailingAnchor constraintEqualToAnchor:vView.trailingAnchor constant:-20],
-        [vStatus.heightAnchor constraintEqualToConstant:40],
+        [vSL.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
+        [vSL.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [vSL.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [vSL.heightAnchor constraintEqualToConstant:40],
 
-        [vSegment.topAnchor constraintEqualToAnchor:vStatus.bottomAnchor constant:10],
-        [vSegment.leadingAnchor constraintEqualToAnchor:vView.leadingAnchor constant:20],
-        [vSegment.trailingAnchor constraintEqualToAnchor:vView.trailingAnchor constant:-20],
+        [vSC.topAnchor constraintEqualToAnchor:vSL.bottomAnchor constant:10],
+        [vSC.leadingAnchor constraintEqualToAnchor:vSL.leadingAnchor],
+        [vSC.trailingAnchor constraintEqualToAnchor:vSL.trailingAnchor],
 
-        [vLog.topAnchor constraintEqualToAnchor:vSegment.bottomAnchor constant:10],
-        [vLog.leadingAnchor constraintEqualToAnchor:vView.leadingAnchor constant:20],
-        [vLog.trailingAnchor constraintEqualToAnchor:vView.trailingAnchor constant:-20],
-        [vLog.bottomAnchor constraintEqualToAnchor:vScroll.topAnchor constant:-10],
+        [vTV.topAnchor constraintEqualToAnchor:vSC.bottomAnchor constant:10],
+        [vTV.leadingAnchor constraintEqualToAnchor:vSL.leadingAnchor],
+        [vTV.trailingAnchor constraintEqualToAnchor:vSL.trailingAnchor],
+        [vTV.bottomAnchor constraintEqualToAnchor:vBSV.topAnchor constant:-10],
 
-        [vTable.topAnchor constraintEqualToAnchor:vLog.topAnchor],
-        [vTable.leadingAnchor constraintEqualToAnchor:vLog.leadingAnchor],
-        [vTable.trailingAnchor constraintEqualToAnchor:vLog.trailingAnchor],
-        [vTable.bottomAnchor constraintEqualToAnchor:vLog.bottomAnchor],
+        [vLV.topAnchor constraintEqualToAnchor:vSC.bottomAnchor constant:10],
+        [vLV.leadingAnchor constraintEqualToAnchor:vSL.leadingAnchor],
+        [vLV.trailingAnchor constraintEqualToAnchor:vSL.trailingAnchor],
+        [vLV.bottomAnchor constraintEqualToAnchor:vBSV.topAnchor constant:-10],
 
-        [vScroll.leadingAnchor constraintEqualToAnchor:vView.leadingAnchor],
-        [vScroll.trailingAnchor constraintEqualToAnchor:vView.trailingAnchor],
-        [vScroll.bottomAnchor constraintEqualToAnchor:vView.safeAreaLayoutGuide.bottomAnchor],
-        [vScroll.heightAnchor constraintEqualToConstant:240],
+        [vBSV.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [vBSV.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [vBSV.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor],
+        [vBSV.heightAnchor constraintEqualToConstant:180],
 
-        [vCont.topAnchor constraintEqualToAnchor:vScroll.topAnchor],
-        [vCont.leadingAnchor constraintEqualToAnchor:vScroll.leadingAnchor],
-        [vCont.trailingAnchor constraintEqualToAnchor:vScroll.trailingAnchor],
-        [vCont.bottomAnchor constraintEqualToAnchor:vScroll.bottomAnchor],
-        [vCont.widthAnchor constraintEqualToAnchor:vScroll.widthAnchor]
+        [vBC.topAnchor constraintEqualToAnchor:vBSV.topAnchor],
+        [vBC.leadingAnchor constraintEqualToAnchor:vBSV.leadingAnchor],
+        [vBC.trailingAnchor constraintEqualToAnchor:vBSV.trailingAnchor],
+        [vBC.bottomAnchor constraintEqualToAnchor:vBSV.bottomAnchor],
+        [vBC.widthAnchor constraintEqualToAnchor:vBSV.widthAnchor]
     ]];
 
     NSArray *btns = @[
@@ -197,42 +199,33 @@ static char kIsMountKey;
         self.locationButton, self.afcButton,
         self.mountButton, self.autoMountButton,
         self.proxyButton, self.profileButton,
-        self.syslogButton, self.processButton,
-        self.houseArrestButton, self.restartButton,
-        self.springboardButton
+        self.managedConfigButton, self.syslogButton,
+        self.processButton, self.houseArrestButton,
+        self.restartButton, self.springboardButton
     ];
 
     UIView *lastV = nil;
     for (int i = 0; i < btns.count; i++) {
         UIView *vB = (UIView *)btns[i];
-        [vB.heightAnchor constraintEqualToConstant:40].active = YES;
-        if (i % 2 == 0) { // Left column
-            [vB.leadingAnchor constraintEqualToAnchor:vCont.leadingAnchor constant:20].active = YES;
-            [vB.trailingAnchor constraintEqualToAnchor:vCont.centerXAnchor constant:-5].active = YES;
-            if (i == 0) [vB.topAnchor constraintEqualToAnchor:vCont.topAnchor constant:10].active = YES;
-            else {
-                UIView *vPrevRow = (UIView *)btns[i-2];
-                [vB.topAnchor constraintEqualToAnchor:vPrevRow.bottomAnchor constant:10].active = YES;
-            }
-        } else { // Right column
-            UIView *vPrevCol = (UIView *)btns[i-1];
-            [vB.leadingAnchor constraintEqualToAnchor:vCont.centerXAnchor constant:5].active = YES;
-            [vB.trailingAnchor constraintEqualToAnchor:vCont.trailingAnchor constant:-20].active = YES;
-            [vB.topAnchor constraintEqualToAnchor:vPrevCol.topAnchor].active = YES;
-        }
+        [NSLayoutConstraint activateConstraints:@[
+            [vB.widthAnchor constraintEqualToAnchor:vBC.widthAnchor multiplier:0.45],
+            [vB.heightAnchor constraintEqualToConstant:36],
+            [vB.topAnchor constraintEqualToAnchor:(i < 2) ? vBC.topAnchor : ((UIView *)btns[i-2]).bottomAnchor constant:10]
+        ]];
+        if (i % 2 == 0) [vB.leadingAnchor constraintEqualToAnchor:vBC.leadingAnchor constant:10].active = YES;
+        else [vB.trailingAnchor constraintEqualToAnchor:vBC.trailingAnchor constant:-10].active = YES;
         lastV = vB;
     }
-    if (lastV) [lastV.bottomAnchor constraintEqualToAnchor:vCont.bottomAnchor constant:-10].active = YES;
+    if (lastV) [lastV.bottomAnchor constraintEqualToAnchor:vBC.bottomAnchor constant:-10].active = YES;
 }
 
-#pragma mark - DeviceConnectionManagerDelegate
+#pragma mark - Delegate
 
 - (void)managerDidLog:(NSString *)message {
-    if (!message) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSString *newText = [([self.logView text] ?: @"") stringByAppendingFormat:@"[%@] %@\n", [NSDate date], message];
-        [self.logView setText:newText];
-        [self.logView scrollRangeToVisible:NSMakeRange([newText length], 0)];
+        NSString *current = self.logView.text;
+        self.logView.text = [current stringByAppendingFormat:@"%@\n", message];
+        [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length, 0)];
     });
 }
 
@@ -240,7 +233,7 @@ static char kIsMountKey;
     dispatch_async(dispatch_get_main_queue(), ^{
         self.statusLabel.text = [NSString stringWithFormat:@"Status: %@", status];
         self.statusLabel.textColor = color;
-        BOOL connected = [status isEqualToString:@"Connected"];
+        BOOL connected = [status isEqualToString:@"Connected"] || [status isEqualToString:@"Mounted"];
         self.connectButton.enabled = !connected;
         self.disconnectButton.enabled = connected;
         self.locationButton.enabled = connected;
@@ -249,6 +242,7 @@ static char kIsMountKey;
         self.autoMountButton.enabled = connected;
         self.proxyButton.enabled = connected;
         self.profileButton.enabled = connected;
+        self.managedConfigButton.enabled = connected;
         self.syslogButton.enabled = connected;
         self.processButton.enabled = connected;
         self.houseArrestButton.enabled = connected;
@@ -318,6 +312,12 @@ static char kIsMountKey;
     ProfileViewController *pvc = [[ProfileViewController alloc] init];
     pvc.connectionManager = self.connectionManager;
     [self.navigationController pushViewController:pvc animated:YES];
+}
+
+- (void)managedConfigTapped {
+    ManagedConfigViewController *mcvc = [[ManagedConfigViewController alloc] init];
+    mcvc.connectionManager = self.connectionManager;
+    [self.navigationController pushViewController:mcvc animated:YES];
 }
 
 - (void)syslogTapped {
