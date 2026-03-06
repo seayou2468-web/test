@@ -154,14 +154,16 @@
     } else if ([name isEqualToString:@"Diag"] && !_diagnostics) {
         err = diagnostics_relay_client_connect(_provider, &_diagnostics);
     } else if ([name isEqualToString:@"RemoteServer"] && !_remoteServer) {
-        [self log:@"[MODERN] Connecting RemoteServer path..."];
+        [self log:@"[MODERN] Initializing Modern path..."];
         err = core_device_proxy_connect(_provider, &_coreDeviceProxy);
         if (!err && _coreDeviceProxy) {
             _baseRsdPort = 0;
             err = core_device_proxy_get_server_rsd_port(_coreDeviceProxy, &_baseRsdPort);
             if (!err && _baseRsdPort > 0) {
-                err = core_device_proxy_create_tcp_adapter(_coreDeviceProxy, &_adapter);
-                _coreDeviceProxy = NULL; // Consumed
+                // create_tcp_adapter consumes _coreDeviceProxy regardless of success.
+                struct CoreDeviceProxyHandle *tempProxy = _coreDeviceProxy;
+                _coreDeviceProxy = NULL;
+                err = core_device_proxy_create_tcp_adapter(tempProxy, &_adapter);
                 if (!err && _adapter) {
                     struct ReadWriteOpaque *socketRS = NULL;
                     err = adapter_connect(_adapter, _baseRsdPort, &socketRS);
@@ -170,7 +172,6 @@
                         err = rsd_handshake_new(socketRS, &hsRS);
                         socketRS = NULL; // Consumed
                         if (!err && hsRS) {
-                            // Discover AppService port before consuming handshake
                             struct CRsdServiceArray *services = NULL;
                             if (rsd_get_services(hsRS, &services) == NULL && services) {
                                 for (size_t i = 0; i < services->count; i++) {
@@ -181,7 +182,6 @@
                                 }
                                 rsd_free_services(services);
                             }
-
                             err = remote_server_connect_rsd(_adapter, hsRS, &_remoteServer);
                             hsRS = NULL; // Consumed
                             if (!err && _remoteServer) {
@@ -191,13 +191,17 @@
                         }
                     }
                 }
-            } else if (err) { core_device_proxy_free(_coreDeviceProxy); _coreDeviceProxy = NULL; }
+            } else if (err) {
+                 core_device_proxy_free(_coreDeviceProxy);
+                 _coreDeviceProxy = NULL;
+            }
         }
     } else if ([name isEqualToString:@"AppService"] && !_appService) {
         [self ensureServiceConnected:@"RemoteServer"];
-        if (_adapter && _appServicePort > 0) {
+        if (_adapter && (_appServicePort > 0 || _baseRsdPort > 0)) {
+            uint16_t targetPort = (_appServicePort > 0) ? _appServicePort : _baseRsdPort;
             struct ReadWriteOpaque *socketAS = NULL;
-            err = adapter_connect(_adapter, _appServicePort, &socketAS);
+            err = adapter_connect(_adapter, targetPort, &socketAS);
             if (!err && socketAS) {
                 struct RsdHandshakeHandle *hsAS = NULL;
                 err = rsd_handshake_new(socketAS, &hsAS);
@@ -208,19 +212,6 @@
                     if (!err && _appService) [self log:@"[MODERN] AppService Connected."];
                 }
             }
-        } else if (_adapter && _baseRsdPort > 0 && _appServicePort == 0) {
-             [self log:@"[WARN] AppService port not discovered, attempting base port..."];
-             struct ReadWriteOpaque *socketAS = NULL;
-             err = adapter_connect(_adapter, _baseRsdPort, &socketAS);
-             if (!err && socketAS) {
-                 struct RsdHandshakeHandle *hsAS = NULL;
-                 err = rsd_handshake_new(socketAS, &hsAS);
-                 socketAS = NULL;
-                 if (!err && hsAS) {
-                     err = app_service_connect_rsd(_adapter, hsAS, &_appService);
-                     hsAS = NULL;
-                 }
-             }
         }
     } else if ([name isEqualToString:@"LegacyLocation"] && !_locationSimulation) {
         err = lockdown_location_simulation_connect(_provider, &_locationSimulation);
